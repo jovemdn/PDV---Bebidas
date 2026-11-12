@@ -1,0 +1,6 @@
+{
+  "name": "DepósitoSys - Ecossistema Delivery & PDV de Bebidas",
+  "description": "Ecossistema SaaS completo para depósitos de bebidas com venda fracionada, controle de temperatura, gestão de vasilhames retornáveis, logística de motoboys e PDV de balcão integrado em tempo real.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

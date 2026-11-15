@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useBeverage } from '../../context/BeverageContext';
-import { Product, CartItem, PaymentMethod, Order } from '../../types';
+import { Product, ProductCategory, CartItem, PaymentMethod, Order } from '../../types';
 import { CancelOrderModal } from './CancelOrderModal';
 import {
   Search,
@@ -12,21 +12,26 @@ import {
   Banknote,
   QrCode,
   Snowflake,
+  Thermometer,
   RefreshCw,
   ShoppingBag,
   Printer,
-  Sparkles,
   Calculator,
   Lock,
+  Unlock,
   Clock,
-  AlertTriangle,
   Ban,
 } from 'lucide-react';
 
-export const BalcaoPDV: React.FC = () => {
+interface BalcaoPDVProps {
+  onOpenCaixaRequest?: () => void;
+}
+
+export const BalcaoPDV: React.FC<BalcaoPDVProps> = ({ onOpenCaixaRequest }) => {
   const {
     products,
     orders,
+    cashShift,
     currentUser,
     submitBalcaoCheckout,
     receiveEmptyVasilhames,
@@ -36,12 +41,14 @@ export const BalcaoPDV: React.FC = () => {
 
   const [orderToCancel, setOrderToCancel] = useState<Order | null>(null);
   const [recentFilter, setRecentFilter] = useState<'ALL' | 'ACTIVE' | 'CANCELED'>('ALL');
+  const [selectedCategory, setSelectedCategory] = useState<ProductCategory>('todas');
+  const [preferredTemp, setPreferredTemp] = useState<'GELADA' | 'NATURAL'>('GELADA');
 
   const [searchQuery, setSearchQuery] = useState('');
   const [ticketItems, setTicketItems] = useState<CartItem[]>([]);
   const [customerName, setCustomerName] = useState('Cliente Balcão');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('DINHEIRO');
-  const [receivedCash, setReceivedCash] = useState<number | undefined>(undefined);
+  const [receivedCashInput, setReceivedCashInput] = useState<string>('');
   const [showReceiptModal, setShowReceiptModal] = useState(false);
   const [lastCompletedTicket, setLastCompletedTicket] = useState<{
     items: CartItem[];
@@ -55,12 +62,31 @@ export const BalcaoPDV: React.FC = () => {
   const [intakeVasilhameId, setIntakeVasilhameId] = useState(vasilhames[0]?.id || '');
   const [intakeQty, setIntakeQty] = useState(12);
 
+  const categories: { id: ProductCategory; label: string }[] = [
+    { id: 'todas', label: 'Todos' },
+    { id: 'cervejas', label: 'Cervejas' },
+    { id: 'destilados', label: 'Destilados & Drinks' },
+    { id: 'refrigerantes', label: 'Bebidas / Refri' },
+    { id: 'gelo_churrasco', label: 'Gelo & Carvão' },
+    { id: 'petiscos', label: 'Petiscos / Doces / Cigarros' },
+  ];
+
   // Filtered products for quick sales
-  const filteredProducts = products.filter(
-    (p) =>
-      p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      p.brand.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredProducts = products
+    .filter((p) => {
+      const matchesCategory = selectedCategory === 'todas' || p.category === selectedCategory;
+      const q = searchQuery.toLowerCase();
+      const matchesSearch =
+        p.name.toLowerCase().includes(q) ||
+        p.brand.toLowerCase().includes(q) ||
+        (p.code || '').toLowerCase().includes(q);
+      return matchesCategory && matchesSearch;
+    })
+    .sort((a, b) => {
+      const aInStock = a.currentBaseStock > 0 ? 0 : 1;
+      const bInStock = b.currentBaseStock > 0 ? 0 : 1;
+      return aInStock - bInStock;
+    });
 
   // Add item directly to the counter ticket
   const addItemToTicket = (
@@ -150,24 +176,42 @@ export const BalcaoPDV: React.FC = () => {
   };
 
   const ticketTotal = ticketItems.reduce((acc, i) => acc + i.subtotal, 0);
+  const hasTicketItems = ticketItems.length > 0 && ticketTotal > 0;
   const ticketCostTotal = ticketItems.reduce(
     (acc, i) => acc + (i.product.costUnit || 0) * i.unitsDeductedFromBaseStock,
     0
   );
   const ticketEstimatedProfit = ticketTotal - ticketCostTotal;
+  const parsedReceivedNumber = (() => {
+    const cleaned = receivedCashInput.replace(/\s+/g, '').replace(',', '.');
+    if (!cleaned || cleaned === '.') return undefined;
+    const n = Number(cleaned);
+    return Number.isFinite(n) && n >= 0 ? n : undefined;
+  })();
+
   const parsedReceivedCash =
-    receivedCash !== undefined && !isNaN(receivedCash) ? receivedCash : undefined;
+    hasTicketItems && parsedReceivedNumber !== undefined ? parsedReceivedNumber : undefined;
   const changeAmount =
-    paymentMethod === 'DINHEIRO' && parsedReceivedCash !== undefined && parsedReceivedCash > ticketTotal
+    hasTicketItems &&
+    paymentMethod === 'DINHEIRO' &&
+    parsedReceivedCash !== undefined &&
+    parsedReceivedCash > ticketTotal
       ? parsedReceivedCash - ticketTotal
       : 0;
   const missingAmount =
+    hasTicketItems &&
     paymentMethod === 'DINHEIRO' &&
     parsedReceivedCash !== undefined &&
     parsedReceivedCash > 0 &&
     parsedReceivedCash < ticketTotal
       ? ticketTotal - parsedReceivedCash
       : 0;
+
+  useEffect(() => {
+    if (ticketItems.length === 0 && receivedCashInput !== '') {
+      setReceivedCashInput('');
+    }
+  }, [ticketItems.length, receivedCashInput]);
 
   const [balcaoError, setBalcaoError] = useState<string | null>(null);
 
@@ -201,12 +245,23 @@ export const BalcaoPDV: React.FC = () => {
         change: changeAmount,
       });
       setTicketItems([]);
-      setReceivedCash(undefined);
+      setReceivedCashInput('');
       setShowReceiptModal(true);
     } else {
       setBalcaoError(res.error || 'Erro ao processar venda no balcão.');
     }
   };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'F2' && ticketItems.length > 0 && cashShift.status === 'OPEN') {
+        e.preventDefault();
+        void handleFinishBalcaoSale();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  });
 
   const handleBottleIntakeSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -234,26 +289,76 @@ export const BalcaoPDV: React.FC = () => {
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
       {/* Coluna Esquerda: Catálogo Rápido com Teclas de Atalho de Fardo/Unidade */}
       <div className="lg:col-span-7 space-y-4">
-        {/* Barra de Pesquisa & Entrada de Cascos Avulsa */}
-        <div className="flex items-center gap-3">
-          <div className="relative flex-1">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Buscar por nome, marca ou código de barras..."
-              className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-white placeholder-slate-500 text-xs focus:outline-none focus:border-amber-500"
-            />
+        {/* Barra de Pesquisa, Temperatura e Entrada de Cascos */}
+        <div className="space-y-2.5">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Pesquisar bebida ou marca..."
+                className="w-full min-h-[42px] pl-10 pr-4 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white placeholder-slate-500 text-sm focus:outline-none focus:border-amber-500"
+              />
+            </div>
+
+            <div className="flex items-center gap-2">
+              <div className="flex bg-slate-900 p-1 rounded-xl border border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setPreferredTemp('GELADA')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer ${
+                    preferredTemp === 'GELADA'
+                      ? 'bg-cyan-500 text-slate-950'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Snowflake className="w-3.5 h-3.5" />
+                  <span>Gelada</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPreferredTemp('NATURAL')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer ${
+                    preferredTemp === 'NATURAL'
+                      ? 'bg-amber-500 text-slate-950'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Thermometer className="w-3.5 h-3.5" />
+                  <span>Natural</span>
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowBottleIntake(true)}
+                className="min-h-[42px] px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-400 text-xs font-bold border border-slate-700 flex items-center gap-1.5 shrink-0 cursor-pointer"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Cascos</span>
+              </button>
+            </div>
           </div>
 
-          <button
-            onClick={() => setShowBottleIntake(true)}
-            className="px-3 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-400 text-xs font-bold border border-slate-700 flex items-center gap-1.5 shrink-0"
-          >
-            <RefreshCw className="w-3.5 h-3.5" />
-            <span>Receber Cascos Vazios</span>
-          </button>
+          {/* Botões Rápidos de Categoria */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+            {categories.map((cat) => (
+              <button
+                key={cat.id}
+                type="button"
+                onClick={() => setSelectedCategory(cat.id)}
+                className={`min-h-[36px] px-3.5 py-1.5 rounded-xl text-xs font-bold shrink-0 whitespace-nowrap transition-colors cursor-pointer ${
+                  selectedCategory === cat.id
+                    ? 'bg-amber-500 text-slate-950'
+                    : 'bg-slate-900 text-slate-300 border border-slate-800 hover:text-white'
+                }`}
+              >
+                {cat.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* Modal de Recepção de Cascos no Balcão */}
@@ -264,6 +369,7 @@ export const BalcaoPDV: React.FC = () => {
                 <RefreshCw className="w-4 h-4" /> Entrada Avulsa de Cascos no Pátio
               </h4>
               <button
+                type="button"
                 onClick={() => setShowBottleIntake(false)}
                 className="text-slate-400 hover:text-white text-xs"
               >
@@ -317,14 +423,17 @@ export const BalcaoPDV: React.FC = () => {
                 className="p-3.5 rounded-2xl bg-slate-900 border border-slate-800 hover:border-slate-700 text-white flex flex-col justify-between"
               >
                 <div className="flex gap-3">
-                  <img
-                    src={p.image}
-                    alt={p.name}
-                    className="w-16 h-16 rounded-xl object-cover bg-slate-950 shrink-0"
-                  />
+                  {p.image && (
+                    <img
+                      src={p.image}
+                      alt={p.name}
+                      referrerPolicy="no-referrer"
+                      className="w-16 h-16 rounded-xl object-cover bg-slate-950 shrink-0"
+                    />
+                  )}
                   <div className="min-w-0 flex-1">
                     <span className="text-[10px] font-bold text-amber-400 uppercase">
-                      {p.brand} • {p.volume}
+                      {p.code ? `Cód. ${p.code} • ` : ''}{p.brand} • {p.volume}
                     </span>
                     <h4 className="text-xs font-bold truncate text-white">{p.name}</h4>
                     <p className="text-[11px] text-emerald-400 font-semibold mt-0.5">
@@ -338,71 +447,90 @@ export const BalcaoPDV: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Botões de Ação Rápida no Balcão */}
-                <div className="mt-3 pt-3 border-t border-slate-800 space-y-2">
-                  <div className="flex items-center gap-2">
-                    {/* Botão 1 Unidade Gelada */}
-                    <button
-                      disabled={isOutOfStock}
-                      onClick={() =>
-                        addItemToTicket(
-                          p,
-                          'UNIDADE',
-                          p.supportsCold ? 'GELADA' : 'NATURAL',
-                          p.isReturnable ? 'TROCA' : 'NAO_APLICA'
-                        )
-                      }
-                      className="flex-1 py-1.5 px-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-bold flex items-center justify-between transition-colors border border-slate-700"
-                    >
-                      <span>
-                        +1 Un {p.supportsCold && '❄️'}
-                      </span>
-                      <span className="text-amber-400">
-                        R$ {(p.priceUnit + (p.supportsCold ? p.coldSurchargeUnit : 0)).toFixed(2)}
-                      </span>
-                    </button>
+                {/* Botões de Ação Rápida no Balcão (Grandes e Fáceis de Clicar) */}
+                {(() => {
+                  const chosenTemp = p.supportsCold ? preferredTemp : 'NATURAL';
+                  const unitPriceDisplay =
+                    p.priceUnit + (chosenTemp === 'GELADA' ? p.coldSurchargeUnit : 0);
+                  const packPriceDisplay =
+                    p.pricePack + (chosenTemp === 'GELADA' ? p.coldSurchargePack : 0);
 
-                    {/* Botão Fardo Inteiro */}
-                    {p.conversionFactor > 1 && (
-                      <button
-                        disabled={isOutOfStock || p.currentBaseStock < p.conversionFactor}
-                        onClick={() =>
-                          addItemToTicket(
-                            p,
-                            'FARDO',
-                            p.supportsCold ? 'GELADA' : 'NATURAL',
-                            p.isReturnable ? 'TROCA' : 'NAO_APLICA'
-                          )
-                        }
-                        className="flex-1 py-1.5 px-2 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-[11px] font-bold text-amber-400 flex items-center justify-between transition-colors border border-amber-500/30"
-                      >
-                        <span>
-                          +1 {p.packName.split(' ')[0]} {p.supportsCold && '❄️'}
-                        </span>
-                        <span className="font-black">
-                          R$ {(p.pricePack + (p.supportsCold ? p.coldSurchargePack : 0)).toFixed(2)}
-                        </span>
-                      </button>
-                    )}
-                  </div>
+                  return (
+                    <div className="mt-3 pt-3 border-t border-slate-800 space-y-2">
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          disabled={isOutOfStock}
+                          onClick={() =>
+                            addItemToTicket(
+                              p,
+                              'UNIDADE',
+                              chosenTemp,
+                              p.isReturnable ? 'TROCA' : 'NAO_APLICA'
+                            )
+                          }
+                          className={`min-h-[42px] py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-between transition-colors border cursor-pointer ${
+                            isOutOfStock
+                              ? 'bg-slate-800/40 text-slate-500 border-slate-800 cursor-not-allowed'
+                              : 'bg-slate-800 hover:bg-slate-700 text-white border-slate-700'
+                          } ${p.conversionFactor <= 1 ? 'col-span-2' : ''}`}
+                        >
+                          <span>
+                            +1 Un {chosenTemp === 'GELADA' ? '❄️' : ''}
+                          </span>
+                          <span className="text-amber-400 font-mono-tabular font-extrabold">
+                            R$ {unitPriceDisplay.toFixed(2)}
+                          </span>
+                        </button>
 
-                  {/* Opção se cliente no balcão NÃO trouxe casco de garrafa */}
-                  {p.isReturnable && (
-                    <button
-                      onClick={() =>
-                        addItemToTicket(
-                          p,
-                          'UNIDADE',
-                          'GELADA',
-                          'COMPRAR_CASCO'
-                        )
-                      }
-                      className="w-full py-1 text-[10px] rounded bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center gap-1"
-                    >
-                      <span>Vender sem troca (+R$ {p.vasilhameDepositPrice?.toFixed(2)} de casco)</span>
-                    </button>
-                  )}
-                </div>
+                        {p.conversionFactor > 1 && (
+                          <button
+                            type="button"
+                            disabled={isOutOfStock || p.currentBaseStock < p.conversionFactor}
+                            onClick={() =>
+                              addItemToTicket(
+                                p,
+                                'FARDO',
+                                chosenTemp,
+                                p.isReturnable ? 'TROCA' : 'NAO_APLICA'
+                              )
+                            }
+                            className={`min-h-[42px] py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-between transition-colors border cursor-pointer ${
+                              isOutOfStock || p.currentBaseStock < p.conversionFactor
+                                ? 'bg-slate-800/40 text-slate-500 border-slate-800 cursor-not-allowed'
+                                : 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border-amber-500/35'
+                            }`}
+                          >
+                            <span>
+                              +1 {p.packName.split(' ')[0]}
+                            </span>
+                            <span className="font-mono-tabular font-extrabold text-amber-400">
+                              R$ {packPriceDisplay.toFixed(2)}
+                            </span>
+                          </button>
+                        )}
+                      </div>
+
+                      {p.isReturnable && (
+                        <button
+                          type="button"
+                          disabled={isOutOfStock}
+                          onClick={() =>
+                            addItemToTicket(
+                              p,
+                              'UNIDADE',
+                              chosenTemp,
+                              'COMPRAR_CASCO'
+                            )
+                          }
+                          className="w-full py-1.5 text-[11px] rounded-lg bg-slate-800/70 hover:bg-slate-800 text-slate-300 hover:text-white flex items-center justify-center gap-1 cursor-pointer"
+                        >
+                          <span>Vender sem casco (+R$ {p.vasilhameDepositPrice?.toFixed(2)})</span>
+                        </button>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             );
           })}
@@ -429,7 +557,11 @@ export const BalcaoPDV: React.FC = () => {
               />
               {ticketItems.length > 0 && (
                 <button
-                  onClick={() => setTicketItems([])}
+                  type="button"
+                  onClick={() => {
+                    setTicketItems([]);
+                    setReceivedCashInput('');
+                  }}
                   className="p-1.5 rounded-lg bg-slate-800 hover:bg-red-500/20 text-slate-400 hover:text-red-400"
                   title="Limpar cupom"
                 >
@@ -453,7 +585,7 @@ export const BalcaoPDV: React.FC = () => {
               ticketItems.map((item) => (
                 <div
                   key={item.id}
-                  className="p-2.5 rounded-xl bg-slate-850 border border-slate-800 flex items-center justify-between text-xs"
+                  className="p-3 rounded-xl bg-slate-950/70 border border-slate-800 flex items-center justify-between text-xs"
                 >
                   <div className="min-w-0 flex-1">
                     <div className="font-bold text-white truncate">{item.product.name}</div>
@@ -471,6 +603,7 @@ export const BalcaoPDV: React.FC = () => {
                   <div className="flex items-center gap-3">
                     <div className="flex items-center bg-slate-800 rounded-lg p-0.5 border border-slate-700">
                       <button
+                        type="button"
                         onClick={() => updateTicketQty(item.id, -1)}
                         className="w-5 h-5 rounded bg-slate-700 hover:bg-slate-600 flex items-center justify-center text-xs"
                       >
@@ -478,6 +611,7 @@ export const BalcaoPDV: React.FC = () => {
                       </button>
                       <span className="w-6 text-center font-bold text-xs">{item.quantity}</span>
                       <button
+                        type="button"
                         onClick={() => updateTicketQty(item.id, 1)}
                         className="w-5 h-5 rounded bg-slate-700 hover:bg-slate-600 flex items-center justify-center text-xs"
                       >
@@ -552,7 +686,7 @@ export const BalcaoPDV: React.FC = () => {
                 {parsedReceivedCash !== undefined && (
                   <button
                     type="button"
-                    onClick={() => setReceivedCash(undefined)}
+                    onClick={() => setReceivedCashInput('')}
                     className="text-[10px] font-bold text-slate-400 hover:text-white underline"
                   >
                     Limpar valor
@@ -568,16 +702,16 @@ export const BalcaoPDV: React.FC = () => {
                   <div className="relative">
                     <span className="absolute left-3 top-2.5 text-xs font-black text-amber-400">R$</span>
                     <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={receivedCash ?? ''}
+                      type="text"
+                      inputMode="decimal"
+                      disabled={!hasTicketItems}
+                      value={hasTicketItems ? receivedCashInput : ''}
                       onChange={(e) => {
-                        const val = e.target.value;
-                        setReceivedCash(val === '' ? undefined : parseFloat(val));
+                        if (!hasTicketItems) return;
+                        setReceivedCashInput(e.target.value.replace(/[^0-9.,]/g, ''));
                       }}
-                      placeholder={ticketTotal > 0 ? ticketTotal.toFixed(2) : '0,00'}
-                      className="w-full pl-9 pr-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-sm text-white font-black focus:outline-none focus:border-amber-500"
+                      placeholder={hasTicketItems ? ticketTotal.toFixed(2) : 'Adicione itens'}
+                      className="w-full pl-9 pr-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-sm text-white font-black focus:outline-none focus:border-amber-500 disabled:opacity-50 disabled:cursor-not-allowed"
                     />
                   </div>
                 </div>
@@ -585,19 +719,30 @@ export const BalcaoPDV: React.FC = () => {
                 {/* Display automático do Troco */}
                 <div
                   className={`p-2.5 rounded-xl border text-center flex flex-col justify-center min-h-[56px] ${
-                    missingAmount > 0
+                    !hasTicketItems
+                      ? 'bg-slate-900 border-slate-800 text-slate-400'
+                      : missingAmount > 0
                       ? 'bg-rose-500/15 border-rose-500/40 text-rose-300'
                       : changeAmount > 0
                       ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
                       : 'bg-slate-900 border-slate-800 text-slate-300'
                   }`}
                 >
-                  {missingAmount > 0 ? (
+                  {!hasTicketItems ? (
+                    <>
+                      <span className="text-[9px] uppercase font-bold tracking-wider text-slate-500">
+                        Troco Calculado
+                      </span>
+                      <span className="text-xs font-bold text-slate-400">
+                        Adicione um produto
+                      </span>
+                    </>
+                  ) : missingAmount > 0 ? (
                     <>
                       <span className="text-[9px] uppercase font-black tracking-wider text-rose-400">
                         Valor Insuficiente
                       </span>
-                      <span className="text-base font-black text-rose-300">
+                      <span className="text-base font-black text-rose-300 font-mono-tabular">
                         Faltam R$ {missingAmount.toFixed(2)}
                       </span>
                     </>
@@ -606,7 +751,7 @@ export const BalcaoPDV: React.FC = () => {
                       <span className="text-[9px] uppercase font-black tracking-wider text-emerald-400">
                         Troco a Devolver
                       </span>
-                      <span className="text-lg font-black text-emerald-300">
+                      <span className="text-lg font-black text-emerald-300 font-mono-tabular">
                         R$ {changeAmount.toFixed(2)}
                       </span>
                     </>
@@ -616,7 +761,7 @@ export const BalcaoPDV: React.FC = () => {
                         Troco Calculado
                       </span>
                       <span className="text-xs font-extrabold text-slate-300">
-                        {parsedReceivedCash !== undefined && ticketTotal > 0
+                        {parsedReceivedCash !== undefined
                           ? 'Valor Exato (R$ 0,00)'
                           : 'Digite o valor pago'}
                       </span>
@@ -627,11 +772,11 @@ export const BalcaoPDV: React.FC = () => {
 
               {/* Botões rápidos de cédulas */}
               <div className="flex flex-wrap items-center gap-1.5">
-                {ticketTotal > 0 && (
+                {hasTicketItems && (
                   <button
                     type="button"
-                    onClick={() => setReceivedCash(Number(ticketTotal.toFixed(2)))}
-                    className="px-2.5 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-[10px] font-black text-emerald-300 border border-emerald-500/30 transition-colors"
+                    onClick={() => setReceivedCashInput(ticketTotal.toFixed(2))}
+                    className="px-2.5 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-[10px] font-black text-emerald-300 border border-emerald-500/30 transition-colors cursor-pointer"
                   >
                     Exato (R$ {ticketTotal.toFixed(2)})
                   </button>
@@ -640,8 +785,9 @@ export const BalcaoPDV: React.FC = () => {
                   <button
                     key={val}
                     type="button"
-                    onClick={() => setReceivedCash(val)}
-                    className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-[10px] font-bold text-amber-300 border border-slate-700 transition-colors"
+                    disabled={!hasTicketItems}
+                    onClick={() => hasTicketItems && setReceivedCashInput(val.toFixed(2))}
+                    className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed text-[10px] font-bold text-amber-300 border border-slate-700 transition-colors cursor-pointer"
                   >
                     R$ {val}
                   </button>
@@ -657,32 +803,53 @@ export const BalcaoPDV: React.FC = () => {
           )}
 
           {/* Total & Finalizar */}
-          <div className="flex items-center justify-between pt-2 border-t border-slate-800">
-            <div>
-              <span className="text-xs text-slate-400 block">Total do Balcão</span>
-              <span className="text-2xl font-black text-amber-400">
-                R$ {ticketTotal.toFixed(2)}
-              </span>
-              {ticketItems.length > 0 && (!currentUser || currentUser.role === 'DONO') && (
-                <span className="text-[10px] text-slate-400 block mt-0.5">
-                  Custo abatido: <strong className="text-rose-300">R$ {ticketCostTotal.toFixed(2)}</strong> &bull; Lucro:{' '}
-                  <strong className="text-emerald-400">R$ {ticketEstimatedProfit.toFixed(2)}</strong>
+          <div className="pt-3 border-t border-slate-800 space-y-3">
+            {cashShift.status === 'CLOSED' && (
+              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/35 flex items-center justify-between gap-2 text-xs">
+                <span className="text-amber-200 font-semibold">
+                  Caixa fechado. Abra para concluir a venda.
                 </span>
-              )}
-            </div>
+                {onOpenCaixaRequest && (
+                  <button
+                    type="button"
+                    onClick={onOpenCaixaRequest}
+                    className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold inline-flex items-center gap-1 shrink-0 cursor-pointer"
+                  >
+                    <Unlock className="w-3.5 h-3.5" />
+                    <span>Abrir Caixa</span>
+                  </button>
+                )}
+              </div>
+            )}
 
-            <button
-              disabled={ticketItems.length === 0}
-              onClick={handleFinishBalcaoSale}
-              className={`px-6 py-3 rounded-xl font-black text-sm flex items-center gap-2 shadow-lg transition-all ${
-                ticketItems.length === 0
-                  ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
-                  : 'bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 text-slate-950 shadow-emerald-500/20 active:scale-95'
-              }`}
-            >
-              <CheckCircle className="w-5 h-5" />
-              <span>Finalizar Venda (F2)</span>
-            </button>
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <span className="text-xs text-slate-400 block">Total da Venda</span>
+                <span className="text-2xl font-black text-amber-400 font-mono-tabular">
+                  R$ {ticketTotal.toFixed(2)}
+                </span>
+                {ticketItems.length > 0 && (!currentUser || currentUser.role === 'DONO') && (
+                  <span className="text-[10px] text-slate-400 block mt-0.5 font-mono-tabular">
+                    Custo: <strong className="text-rose-300">R$ {ticketCostTotal.toFixed(2)}</strong> &bull; Lucro:{' '}
+                    <strong className="text-emerald-400">R$ {ticketEstimatedProfit.toFixed(2)}</strong>
+                  </span>
+                )}
+              </div>
+
+              <button
+                type="button"
+                disabled={ticketItems.length === 0 || cashShift.status === 'CLOSED'}
+                onClick={handleFinishBalcaoSale}
+                className={`min-h-[48px] px-6 py-3 rounded-xl font-extrabold text-sm flex items-center gap-2 transition-all cursor-pointer ${
+                  ticketItems.length === 0 || cashShift.status === 'CLOSED'
+                    ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                    : 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-lg active:scale-95'
+                }`}
+              >
+                <CheckCircle className="w-5 h-5" />
+                <span>Finalizar Venda (F2)</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -724,12 +891,14 @@ export const BalcaoPDV: React.FC = () => {
 
             <div className="pt-3 border-t border-dashed border-slate-300 flex gap-2">
               <button
+                type="button"
                 onClick={() => setShowReceiptModal(false)}
                 className="flex-1 py-2 rounded-xl bg-slate-900 text-white font-sans font-bold hover:bg-slate-800"
               >
                 Fechar
               </button>
               <button
+                type="button"
                 onClick={() => {
                   window.print();
                   setShowReceiptModal(false);

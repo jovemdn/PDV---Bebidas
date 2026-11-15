@@ -1,28 +1,26 @@
 import React from 'react';
 import { useBeverage } from '../context/BeverageContext';
+import { buildRoutePath, navigateToRoute } from '../services/routeService';
+import { isSyntheticStaffEmail } from '../services/firebaseDbService';
 import {
-  Smartphone,
   Monitor,
   Database,
   Bell,
   BellOff,
   RefreshCw,
-  SmartphoneCharging,
   LogOut,
-  User,
   Truck,
-  ShoppingBag,
-  Store,
-  ShieldCheck,
-  RotateCcw,
+  ExternalLink,
+  Home,
+  Cloud,
+  CloudOff,
+  AlertTriangle,
 } from 'lucide-react';
 
 export const Navbar: React.FC = () => {
   const {
     activeView,
     setActiveView,
-    customerMobileFrame,
-    setCustomerMobileFrame,
     currentUser,
     logout,
     orders,
@@ -31,6 +29,10 @@ export const Navbar: React.FC = () => {
     resetAllData,
     settings,
     cashShift,
+    cloudUser,
+    cloudRoleStatus,
+    cloudSyncing,
+    connectCloudGoogle,
   } = useBeverage();
 
   const pendingOrdersCount = orders.filter(
@@ -40,165 +42,162 @@ export const Navbar: React.FC = () => {
   const isDono = currentUser?.role === 'DONO';
   const isBalcao = currentUser?.role === 'BALCAO';
   const isMotoboy = currentUser?.role === 'MOTOBOY';
-  const isCliente = currentUser?.role === 'CLIENTE';
+
+  const customerStoreUrl = buildRoutePath({ page: 'CUSTOMER_STORE' });
 
   return (
     <header className="bg-slate-900 border-b border-slate-800 text-white sticky top-0 z-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16">
-          {/* Logo & Brand */}
-          <div
-            onClick={() => setActiveView(currentUser ? activeView : 'PORTAL_LOGIN')}
-            className="flex items-center space-x-3 cursor-pointer group"
-          >
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-amber-600 flex items-center justify-center shadow-lg shadow-amber-500/20 font-black text-xl text-slate-950 group-hover:scale-105 transition-transform">
-              🍻
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="font-extrabold text-lg tracking-tight bg-gradient-to-r from-amber-400 via-amber-200 to-yellow-100 bg-clip-text text-transparent">
-                  {settings.storeName}
-                </span>
-                <span
-                  className={`text-[9px] font-black px-1.5 py-0.5 rounded border uppercase tracking-wider ${
-                    cashShift.status === 'OPEN'
-                      ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
-                      : 'bg-rose-500/15 text-rose-400 border-rose-500/30'
-                  }`}
-                >
-                  {cashShift.status === 'OPEN' ? 'Caixa Aberto' : 'Caixa Fechado'}
-                </span>
+        <div className="flex items-center justify-between gap-4 h-16">
+          {/* Zone 1: Brand Wordmark + Cash Status */}
+          <div className="flex items-center gap-3 min-w-0 shrink-0">
+            <button
+              type="button"
+              onClick={() => navigateToRoute({ page: 'HUB' })}
+              className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors shrink-0"
+              title="Voltar à Central de Páginas"
+            >
+              <Home className="w-4 h-4" />
+            </button>
+
+            <div
+              onClick={() => setActiveView(currentUser ? activeView : 'PORTAL_LOGIN')}
+              className="flex items-center gap-2.5 cursor-pointer"
+            >
+              <div className="w-9 h-9 rounded-lg bg-amber-500 flex items-center justify-center font-display font-extrabold text-sm text-slate-950 shrink-0">
+                DS
               </div>
-              <p className="text-xs text-slate-400 hidden sm:block">
-                Ecossistema de Delivery & Frente de Caixa
-              </p>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="font-display font-bold text-base tracking-tight text-white whitespace-nowrap">
+                    {settings.storeName}
+                  </span>
+                  <span
+                    className={`hidden sm:inline-block text-[11px] font-semibold px-2 py-0.5 rounded border whitespace-nowrap ${
+                      cashShift.status === 'OPEN'
+                        ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                        : 'bg-rose-500/15 text-rose-400 border-rose-500/30'
+                    }`}
+                  >
+                    {cashShift.status === 'OPEN' ? 'Caixa Aberto' : 'Caixa Fechado'}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 hidden lg:block whitespace-nowrap">
+                  Portal Operacional da Equipe
+                </p>
+              </div>
             </div>
           </div>
 
-          {/* Central Navigation Switcher (Adaptable by Active Role) */}
+          {/* Zone 2: Role-Scoped Workspace Navigation */}
           {currentUser && (
-            <div className="flex items-center bg-slate-950/80 p-1 rounded-xl border border-slate-800/80 shadow-inner">
-              {/* Cliente View Option */}
-              {(isCliente || isDono || isBalcao) && (
-                <button
-                  onClick={() => setActiveView('CUSTOMER_APP')}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                    activeView === 'CUSTOMER_APP'
-                      ? 'bg-amber-500 text-slate-950 shadow-md font-bold'
-                      : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
-                  }`}
-                >
-                  <Smartphone className="w-4 h-4" />
-                  <span>App Cliente</span>
-                </button>
-              )}
-
-              {/* PDV / Balcão Option */}
+            <nav className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 shrink-0">
               {(isDono || isBalcao) && (
                 <button
+                  type="button"
                   onClick={() => setActiveView('EMPLOYEE_PDV')}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold relative transition-all ${
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors ${
                     activeView === 'EMPLOYEE_PDV'
-                      ? 'bg-amber-500 text-slate-950 shadow-md font-bold'
-                      : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+                      ? 'bg-amber-500 text-slate-950 font-bold'
+                      : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
                   }`}
                 >
-                  <Monitor className="w-4 h-4" />
+                  <Monitor className="w-4 h-4 shrink-0" />
                   <span>PDV {isDono ? '(Dono)' : '(Balcão)'}</span>
                   {pendingOrdersCount > 0 && (
-                    <span className="w-5 h-5 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center font-bold animate-pulse shadow-sm">
+                    <span className="px-1.5 py-0.5 rounded bg-rose-600 text-white text-[10px] font-mono-tabular font-bold leading-none">
                       {pendingOrdersCount}
                     </span>
                   )}
                 </button>
               )}
 
-              {/* Motoboy App Option */}
               {(isMotoboy || isDono) && (
                 <button
+                  type="button"
                   onClick={() => setActiveView('MOTOBOY_APP')}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold relative transition-all ${
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors ${
                     activeView === 'MOTOBOY_APP'
-                      ? 'bg-amber-500 text-slate-950 shadow-md font-bold'
-                      : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+                      ? 'bg-amber-500 text-slate-950 font-bold'
+                      : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
                   }`}
                 >
-                  <Truck className="w-4 h-4 text-emerald-400" />
-                  <span>App Motoboy</span>
+                  <Truck className="w-4 h-4 shrink-0" />
+                  <span>Entregas</span>
                 </button>
               )}
 
-              {/* Arquitetura & Docs (apenas Dono ou atalho) */}
               {isDono && (
                 <button
+                  type="button"
                   onClick={() => setActiveView('SYSTEM_ARCHITECTURE')}
-                  className={`hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                  className={`hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors ${
                     activeView === 'SYSTEM_ARCHITECTURE'
-                      ? 'bg-amber-500 text-slate-950 shadow-md font-bold'
-                      : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+                      ? 'bg-amber-500 text-slate-950 font-bold'
+                      : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
                   }`}
                 >
-                  <Database className="w-4 h-4" />
-                  <span>Docs</span>
+                  <Database className="w-4 h-4 shrink-0" />
+                  <span>Arquitetura</span>
                 </button>
               )}
-            </div>
+            </nav>
           )}
 
-          {/* Right Action buttons (User Badge, Device Toggle, Sound, Logout) */}
-          <div className="flex items-center space-x-2">
-            {/* User Session Badge */}
-            {currentUser ? (
-              <div className="flex items-center gap-1.5 pl-2">
-                <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-950 border border-slate-800 text-xs">
-                  <span className="text-sm">
-                    {isDono ? '👑' : isBalcao ? '🏪' : isMotoboy ? '🛵' : '📱'}
-                  </span>
-                  <div className="text-left leading-none">
-                    <span className="font-bold text-white block text-[11px] truncate max-w-[110px]">
-                      {currentUser.name}
-                    </span>
-                    <span className="text-[9px] text-amber-400 font-extrabold uppercase">
-                      {currentUser.role}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Botão Sair / Trocar Perfil */}
-                <button
-                  type="button"
-                  onClick={logout}
-                  className="px-2.5 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 text-xs font-bold flex items-center gap-1.5 transition-colors"
-                  title="Trocar de usuário ou sair"
-                >
-                  <LogOut className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Sair</span>
-                </button>
+          {/* Zone 3: Right Controls */}
+          <div className="flex items-center gap-2 shrink-0">
+            {cloudUser &&
+            (cloudUser.emailVerified || isSyntheticStaffEmail(cloudUser.email)) &&
+            (cloudRoleStatus.isOwner || cloudRoleStatus.isAuthorizedStaff) ? (
+              <div
+                title={
+                  isSyntheticStaffEmail(cloudUser.email)
+                    ? `Nuvem conectada: @${cloudRoleStatus.staffUsername || 'equipe'} (${cloudRoleStatus.role || 'Equipe'})`
+                    : `Nuvem conectada: ${cloudUser.email} (${cloudRoleStatus.isOwner ? 'Dono' : 'Equipe'})`
+                }
+                className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[11px] font-bold whitespace-nowrap"
+              >
+                <Cloud className={`w-3.5 h-3.5 ${cloudSyncing ? 'animate-pulse' : ''}`} />
+                <span>{cloudSyncing ? 'Sincronizando...' : 'Nuvem Online'}</span>
               </div>
+            ) : cloudUser?.emailVerified ? (
+              <button
+                type="button"
+                onClick={() => void connectCloudGoogle()}
+                title={`Conta ${cloudUser.email} não autorizada na equipe. Clique para trocar de conta Google.`}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/35 text-rose-300 text-[11px] font-bold whitespace-nowrap transition-colors cursor-pointer"
+              >
+                <AlertTriangle className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Conta sem Permissão</span>
+              </button>
             ) : (
               <button
                 type="button"
-                onClick={() => setActiveView('PORTAL_LOGIN')}
-                className="px-3 py-1.5 rounded-xl bg-amber-500 text-slate-950 text-xs font-black shadow-md hover:bg-amber-400 transition-colors"
+                onClick={() => void connectCloudGoogle()}
+                disabled={cloudSyncing}
+                title="Conectar conta Google do Dono para sincronizar PC, Motoboy e App Cliente na nuvem"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 text-[11px] font-bold whitespace-nowrap transition-colors cursor-pointer"
               >
-                Acessar Portal
+                <CloudOff className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">{cloudSyncing ? 'Conectando...' : 'Conectar Nuvem'}</span>
               </button>
             )}
 
-            {/* Alternador Moldura Mobile vs Tela Cheia quando no App do Cliente */}
-            {activeView === 'CUSTOMER_APP' && (
-              <button
-                onClick={() => setCustomerMobileFrame(!customerMobileFrame)}
-                title={customerMobileFrame ? 'Mudar para tela cheia de computador' : 'Simular tela de celular'}
-                className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-300 transition-colors border border-slate-700"
+            {currentUser && (
+              <a
+                href={customerStoreUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hidden md:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-slate-200 whitespace-nowrap transition-colors"
+                title="Abrir página pública do cliente em nova aba"
               >
-                <SmartphoneCharging className="w-3.5 h-3.5 text-amber-400" />
-                <span>{customerMobileFrame ? 'Moldura Celular' : 'Modo Computador'}</span>
-              </button>
+                <span>Loja do Cliente</span>
+                <ExternalLink className="w-3.5 h-3.5 text-amber-400" />
+              </a>
             )}
 
-            {/* Toggle Sound */}
             <button
+              type="button"
               onClick={toggleSound}
               title={soundEnabled ? 'Silenciar alertas sonoros' : 'Ativar alertas sonoros'}
               className={`p-2 rounded-lg border transition-colors ${
@@ -210,18 +209,42 @@ export const Navbar: React.FC = () => {
               {soundEnabled ? <Bell className="w-4 h-4" /> : <BellOff className="w-4 h-4" />}
             </button>
 
-            {/* Reset Data */}
-            <button
-              onClick={resetAllData}
-              title="Reiniciar dados da demonstração"
-              className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white border border-slate-700 transition-colors"
-            >
-              <RefreshCw className="w-4 h-4" />
-            </button>
+            {isDono && (
+              <button
+                type="button"
+                onClick={resetAllData}
+                title="Zerar pedidos e caixa para novo turno"
+                className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white border border-slate-700 transition-colors"
+              >
+                <RefreshCw className="w-4 h-4" />
+              </button>
+            )}
+
+            {currentUser && (
+              <div className="flex items-center gap-2 pl-1">
+                <div className="hidden lg:block text-right leading-tight">
+                  <span className="font-semibold text-white block text-xs truncate max-w-[130px]">
+                    {currentUser.name}
+                  </span>
+                  <span className="text-[10px] text-amber-400 font-bold uppercase">
+                    {currentUser.role}
+                  </span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={logout}
+                  className="px-3 py-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 text-xs font-bold flex items-center gap-1.5 whitespace-nowrap transition-colors"
+                  title="Trocar de operador ou sair"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Sair</span>
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>
     </header>
   );
 };
-

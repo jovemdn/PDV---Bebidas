@@ -17,6 +17,7 @@ import {
   ArrowLeft,
   Copy,
   Check,
+  Cloud,
 } from 'lucide-react';
 
 interface OrderTrackerModalProps {
@@ -49,7 +50,15 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
   onClose,
   initialTab = 'STATUS',
 }) => {
-  const { orders, setActiveView, motoboys, settings, sendOrderMessage } = useBeverage();
+  const {
+    orders,
+    motoboys,
+    settings,
+    sendOrderMessage,
+    cloudUser,
+    cloudSyncing,
+    connectCloudGoogle,
+  } = useBeverage();
   const [activeTab, setActiveTab] = useState<'STATUS' | 'CHAT'>(initialTab);
   const [inputText, setInputText] = useState('');
   const [copiedPhone, setCopiedPhone] = useState(false);
@@ -111,16 +120,6 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
     `Olá ${order.motoboyName || 'Entregador'}! Sou ${order.customer?.name || 'Cliente'} do Pedido #${order.orderNumber}.`
   );
   const whatsappMotoboyUrl = cleanMotoboyPhone ? `https://wa.me/55${cleanMotoboyPhone}?text=${encodedMsgMotoboy}` : '#';
-
-  const handleOpenExternal = (e: React.MouseEvent, url: string) => {
-    e.preventDefault();
-    if (!url || url === '#') return;
-    try {
-      window.open(url, '_blank', 'noopener,noreferrer');
-    } catch {
-      window.location.href = url;
-    }
-  };
 
   const handleCopyPhone = (phone: string) => {
     try {
@@ -229,6 +228,23 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
             </button>
           </div>
 
+          {!cloudUser?.emailVerified && (
+            <div className="px-3 sm:px-4 py-2 bg-amber-500/10 border-b border-amber-500/25 flex items-center justify-between gap-2 text-[11px] shrink-0">
+              <span className="text-amber-200 flex items-center gap-1.5 min-w-0">
+                <Cloud className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <span className="truncate">Conecte o Google para receber status e chat ao vivo.</span>
+              </span>
+              <button
+                type="button"
+                disabled={cloudSyncing}
+                onClick={() => void connectCloudGoogle()}
+                className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-black shrink-0 cursor-pointer"
+              >
+                {cloudSyncing ? 'Conectando...' : 'Conectar'}
+              </button>
+            </div>
+          )}
+
           {/* Conteúdo Aba 1: Rastreamento do Pedido */}
           {activeTab === 'STATUS' && (
             <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4 sm:space-y-5 no-scrollbar">
@@ -313,22 +329,23 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
                     </button>
 
                     {assignedMotoboy?.phone && (
-                      <button
-                        type="button"
-                        onClick={(e) => handleOpenExternal(e, whatsappMotoboyUrl)}
+                      <a
+                        href={whatsappMotoboyUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
                         className="py-2 px-3 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 font-bold text-xs flex items-center gap-1.5 border border-emerald-500/40 transition-colors"
                         title="Abrir WhatsApp com o Motoboy"
                       >
                         <ExternalLink className="w-3.5 h-3.5" />
                         <span>WhatsApp</span>
-                      </button>
+                      </a>
                     )}
                   </div>
                 </div>
               ) : (
                 <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-800/80 border border-slate-700 flex items-center justify-between">
                   <div className="flex items-center gap-2.5">
-                    <div className="w-9 h-9 rounded-xl bg-slate-850 text-amber-400 flex items-center justify-center font-bold">
+                    <div className="w-9 h-9 rounded-xl bg-slate-950 text-amber-400 flex items-center justify-center font-bold">
                       <MessageCircle className="w-4 h-4" />
                     </div>
                     <div>
@@ -418,27 +435,6 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
                   </div>
                 </div>
               </div>
-
-              {/* Switch to PDV to simulate order progression */}
-              <div className="p-3 bg-slate-800/50 rounded-2xl border border-slate-700/60 flex items-center justify-between">
-                <div className="text-xs">
-                  <p className="font-bold text-white">Quer testar o fluxo completo?</p>
-                  <p className="text-slate-400 text-[11px]">
-                    Vá para o PDV do Depósito para despachar ou trocar de status.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onClose();
-                    setActiveView('EMPLOYEE_PDV');
-                  }}
-                  className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center gap-1.5 transition-all"
-                >
-                  <span>Ver no PDV</span>
-                  <ExternalLink className="w-3.5 h-3.5" />
-                </button>
-              </div>
             </div>
           )}
 
@@ -481,15 +477,16 @@ export const OrderTrackerModal: React.FC<OrderTrackerModalProps> = ({
                     </button>
                   )}
 
-                  <button
-                    type="button"
-                    onClick={(e) => handleOpenExternal(e, whatsappLojaUrl)}
+                  <a
+                    href={whatsappLojaUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
                     className="py-1 px-2.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 border border-emerald-500/40 text-[11px] font-bold flex items-center gap-1 transition-colors"
                     title="Abrir no WhatsApp da Loja"
                   >
                     <ExternalLink className="w-3 h-3" />
                     <span>WhatsApp</span>
-                  </button>
+                  </a>
                 </div>
               </div>
 

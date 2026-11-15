@@ -18,6 +18,7 @@ import {
   Search,
   Sparkles,
   SlidersHorizontal,
+  Camera,
 } from 'lucide-react';
 
 export const EstoqueVasilhames: React.FC = () => {
@@ -219,11 +220,14 @@ export const EstoqueVasilhames: React.FC = () => {
                     {/* Produto */}
                     <td className="py-3 px-3">
                       <div className="flex items-center gap-2.5">
-                        <img
-                          src={p.image}
-                          alt={p.name}
-                          className="w-10 h-10 rounded-xl object-cover bg-slate-950 shrink-0"
-                        />
+                        {p.image && (
+                          <img
+                            src={p.image}
+                            alt={p.name}
+                            referrerPolicy="no-referrer"
+                            className="w-10 h-10 rounded-xl object-cover bg-slate-950 shrink-0"
+                          />
+                        )}
                         <div>
                           <div className="font-bold text-white group-hover:text-amber-400 transition-colors">
                             {p.name}
@@ -349,16 +353,27 @@ export const EstoqueVasilhames: React.FC = () => {
                           <SlidersHorizontal className="w-3.5 h-3.5" />
                         </button>
 
-                        {/* Botão de Editar Produto Completo */}
+                        {/* Botão rápido de Foto / Editar Produto */}
                         <button
                           onClick={() => {
                             setProductToEdit(p);
                             setIsProductModalOpen(true);
                           }}
-                          className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-colors"
-                          title="Editar Cadastro do Produto"
+                          className={`px-2 py-1.5 rounded-lg border transition-colors inline-flex items-center gap-1 text-[10px] font-bold ${
+                            p.image
+                              ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
+                              : 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border-amber-500/30'
+                          }`}
+                          title={p.image ? 'Editar Produto / Foto' : 'Adicionar Foto / Editar'}
                         >
-                          <Edit2 className="w-3.5 h-3.5" />
+                          {p.image ? (
+                            <Edit2 className="w-3.5 h-3.5" />
+                          ) : (
+                            <>
+                              <Camera className="w-3.5 h-3.5" />
+                              <span>Foto</span>
+                            </>
+                          )}
                         </button>
 
                         {/* Botão de Excluir */}

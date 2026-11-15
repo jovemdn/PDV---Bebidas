@@ -130,9 +130,9 @@ export const KDSDelivery: React.FC = () => {
       {filteredOrders.length === 0 ? (
         <div className="py-20 text-center text-slate-500 bg-slate-900/50 rounded-3xl border border-slate-800 space-y-3">
           <Package className="w-12 h-12 mx-auto text-slate-600" />
-          <h3 className="text-sm font-bold text-slate-400">Nenhum pedido neste filtro</h3>
-          <p className="text-xs text-slate-500 max-w-sm mx-auto">
-            Abra a aba "App do Cliente" no topo para fazer um pedido e ver o alerta sonoro tocar aqui instantaneamente!
+          <h3 className="text-sm font-bold text-slate-300">Nenhum pedido de entrega no momento</h3>
+          <p className="text-xs text-slate-400 max-w-sm mx-auto">
+            Quando um cliente comprar pelo link da loja (/loja), o pedido aparecerá aqui automaticamente com alerta sonoro.
           </p>
         </div>
       ) : (

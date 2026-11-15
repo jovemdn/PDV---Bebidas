@@ -2,7 +2,7 @@ export type TemperatureOption = 'GELADA' | 'NATURAL';
 export type PresentationOption = 'UNIDADE' | 'FARDO';
 export type VasilhameOption = 'TROCA' | 'COMPRAR_CASCO' | 'NAO_APLICA';
 export type PaymentMethod = 'PIX' | 'CARTAO_ENTREGA' | 'DINHEIRO';
-export type OrderStatus = 
+export type OrderStatus =
   | 'PENDENTE'
   | 'CONFIRMADO_PREPARO'
   | 'AGUARDANDO_MOTOBOY'
@@ -10,7 +10,7 @@ export type OrderStatus =
   | 'ENTREGUE'
   | 'CANCELADO';
 
-export type ProductCategory = 
+export type ProductCategory =
   | 'todas'
   | 'cervejas'
   | 'destilados'
@@ -20,35 +20,36 @@ export type ProductCategory =
 
 export interface Product {
   id: string;
+  code?: string;
   name: string;
   category: ProductCategory;
   brand: string;
   image: string;
   description: string;
-  volume: string; // ex: '350ml', '600ml', '1L', '5kg'
-  
+  volume: string;
+
   // Regra de Venda Fracionada & Estoque Base
   baseUnit: 'LATA' | 'GARRAFA' | 'PET' | 'SACO' | 'UN';
-  conversionFactor: number; // ex: 12 para fardo com 12 latas, 24 para engradado
-  packName: string; // ex: "Fardo c/ 12 latas", "Caixa c/ 24"
-  currentBaseStock: number; // Estoque unificado em unidades individuais
+  conversionFactor: number;
+  packName: string;
+  currentBaseStock: number;
   minAlertStock: number;
-  
+
   // Preços e Custo
-  costUnit?: number; // Preço de custo de 1 unidade base
-  priceUnit: number; // Preço 1 unidade natural
-  pricePack: number; // Preço fardo natural (com desconto de atacado embutido)
-  
+  costUnit?: number;
+  priceUnit: number;
+  pricePack: number;
+
   // Regra de Temperatura
   supportsCold: boolean;
-  coldSurchargeUnit: number; // Acréscimo para 1 unidade gelada (ex: R$ 1,00)
-  coldSurchargePack: number; // Acréscimo para fardo gelado (ex: R$ 3,00)
-  
+  coldSurchargeUnit: number;
+  coldSurchargePack: number;
+
   // Regra de Vasilhames/Cascos
   isReturnable: boolean;
   vasilhameId?: string;
   vasilhameName?: string;
-  vasilhameDepositPrice?: number; // Preço se o cliente comprar o casco avulso (ex: R$ 3,50)
+  vasilhameDepositPrice?: number;
 }
 
 export interface CartItem {
@@ -58,12 +59,12 @@ export interface CartItem {
   presentation: PresentationOption;
   temperature: TemperatureOption;
   vasilhameOption: VasilhameOption;
-  quantity: number; // quantidade de fardos ou unidades
-  unitPriceCalculated: number; // Preço unitário final calculado
+  quantity: number;
+  unitPriceCalculated: number;
   coldSurchargeTotal: number;
   vasilhameFeeTotal: number;
   subtotal: number;
-  unitsDeductedFromBaseStock: number; // Quantidade de unidades reais do estoque (qty * conversionFactor se fardo)
+  unitsDeductedFromBaseStock: number;
 }
 
 export interface OrderItem {
@@ -108,13 +109,13 @@ export interface Order {
   totalCost?: number;
   grossProfit?: number;
   paymentMethod: PaymentMethod;
-  changeFor?: number; // Troco para R$
+  changeFor?: number;
   motoboyId?: string;
   motoboyName?: string;
   motoboyAssignedAt?: string;
   deliveredAt?: string;
   estimatedDeliveryMinutes: number;
-  
+
   // Métricas de Vasilhames
   vasilhamesVaziosAReceber: number;
   vasilhamesNovosVendidos: number;
@@ -126,6 +127,10 @@ export interface Order {
   canceledAt?: string;
   canceledBy?: string;
   cancelReason?: string;
+
+  // Vínculo com usuário autenticado na nuvem
+  customerUid?: string;
+  customerEmail?: string;
 }
 
 export interface OrderMessage {
@@ -150,16 +155,38 @@ export interface Motoboy {
   totalCollectedCard: number;
   totalCollectedPix: number;
   commissionBalance: number;
+  accessPassword?: string;
+  googleEmail?: string;
+  cloudUsername?: string;
 }
 
 export interface VasilhameControl {
   id: string;
   name: string;
   bottleType: string;
-  fullInStorage: number; // Garrafas cheias prontas para venda
-  emptyInYard: number; // Cascos vazios no pátio aguardando cervejaria
-  depositPrice: number; // Preço de venda/caução do vasilhame
+  fullInStorage: number;
+  emptyInYard: number;
+  depositPrice: number;
   totalInCirculationWithCustomers: number;
+}
+
+export type CashFlowType = 'RETIRADA_DESPESA' | 'SUPRIMENTO';
+export type CashFlowCategory =
+  | 'DESPESA_LOJA'
+  | 'RETIRADA_DONO'
+  | 'FORNECEDOR'
+  | 'TROCO_REFORCO'
+  | 'OUTROS';
+
+export interface CashFlowMovement {
+  id: string;
+  shiftId: string;
+  type: CashFlowType;
+  category: CashFlowCategory;
+  amount: number;
+  description: string;
+  createdBy: string;
+  createdAt: string;
 }
 
 export interface CashShift {
@@ -168,15 +195,15 @@ export interface CashShift {
   status: 'OPEN' | 'CLOSED';
   openedAt: string;
   closedAt?: string;
-  initialFloat: number; // Fundo de caixa inicial colocado pelo operador
+  initialFloat: number;
   balcaoCash: number;
   balcaoCard: number;
   balcaoPix: number;
   deliveryCash: number;
   deliveryCard: number;
   deliveryPix: number;
-  closingCashInDrawer?: number; // Contagem física cega ou informada
-  closingDifference?: number; // Quebra / sobra
+  closingCashInDrawer?: number;
+  closingDifference?: number;
   closingNotes?: string;
 }
 
@@ -207,6 +234,9 @@ export interface CashShiftRecord {
   deliveryCash: number;
   deliveryCard: number;
   deliveryPix: number;
+  totalCashInflows?: number;
+  totalCashOutflows?: number;
+  cashFlowMovements?: CashFlowMovement[];
   expectedFinalCash: number;
   finalCashInDrawer: number;
   closingDifference: number;
@@ -233,8 +263,23 @@ export interface DepotSettings {
   allowNegativeStock: boolean;
   autoPrintReceipt: boolean;
   cancelPassword: string;
+  ownerPassword?: string;
+  balcaoPassword?: string;
+  motoboyDefaultPassword?: string;
   ownerWhatsApp: string;
   ownerEmail: string;
+  staffEmails?: string[];
+  staffUids?: string[];
+}
+
+export interface StaffAccount {
+  uid: string;
+  username: string;
+  displayName: string;
+  role: 'BALCAO' | 'MOTOBOY';
+  motoboyId?: string;
+  active: boolean;
+  createdAt: string;
 }
 
 export interface StockMovement {
@@ -260,4 +305,44 @@ export interface UserSession {
 }
 
 export type DeviceMode = 'MOBILE' | 'DESKTOP';
+
+export type AppPageRoute =
+  | { page: 'HUB' }
+  | { page: 'CUSTOMER_STORE' }
+  | { page: 'EMPLOYEE_PORTAL' };
+
+export interface TableTabItem {
+  id: string;
+  productId: string;
+  productName: string;
+  brand: string;
+  volume: string;
+  presentation: PresentationOption;
+  temperature: TemperatureOption;
+  vasilhameOption: VasilhameOption;
+  quantity: number;
+  unitsPerItem: number;
+  unitPrice: number;
+  coldSurchargeUnit: number;
+  vasilhameFeeUnit: number;
+  subtotal: number;
+  addedAt: string;
+}
+
+export interface TableTab {
+  id: string;
+  numberOrLabel: string;
+  customerName: string;
+  status: 'OPEN' | 'CLOSED';
+  openedAt: string;
+  closedAt?: string;
+  openedBy: string;
+  closedBy?: string;
+  items: TableTabItem[];
+  totalAmount: number;
+  paymentMethod?: PaymentMethod;
+  changeFor?: number;
+  orderId?: string;
+  orderNumber?: number;
+}
 

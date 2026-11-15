@@ -92,16 +92,6 @@ export const OrderChatModal: React.FC<OrderChatModalProps> = ({
   );
   const whatsappLojaUrl = cleanPhone ? `https://wa.me/55${cleanPhone}?text=${encodedMsgLoja}` : '#';
 
-  const handleOpenWhatsApp = (e: React.MouseEvent) => {
-    e.preventDefault();
-    if (!whatsappLojaUrl || whatsappLojaUrl === '#') return;
-    try {
-      window.open(whatsappLojaUrl, '_blank', 'noopener,noreferrer');
-    } catch {
-      window.location.href = whatsappLojaUrl;
-    }
-  };
-
   return (
     <div
       onClick={(e) => {
@@ -140,15 +130,16 @@ export const OrderChatModal: React.FC<OrderChatModalProps> = ({
             <div className="flex items-center gap-2">
               {/* Botão de WhatsApp Direto */}
               {cleanPhone && (
-                <button
-                  type="button"
-                  onClick={handleOpenWhatsApp}
+                <a
+                  href={whatsappLojaUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
                   title="Abrir no WhatsApp"
                   className="p-2 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 border border-emerald-500/40 transition-colors flex items-center gap-1 text-xs font-bold"
                 >
                   <ExternalLink className="w-4 h-4" />
                   <span className="hidden sm:inline">WhatsApp</span>
-                </button>
+                </a>
               )}
 
               <button

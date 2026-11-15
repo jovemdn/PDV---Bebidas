@@ -11,7 +11,9 @@ interface ProductModalProps {
 export const ProductModal: React.FC<ProductModalProps> = ({ product, onClose }) => {
   const { addToCart } = useBeverage();
 
-  const [presentation, setPresentation] = useState<PresentationOption>('FARDO');
+  const [presentation, setPresentation] = useState<PresentationOption>(
+    product?.conversionFactor && product.conversionFactor > 1 ? 'FARDO' : 'UNIDADE'
+  );
   const [temperature, setTemperature] = useState<TemperatureOption>(
     product?.supportsCold ? 'GELADA' : 'NATURAL'
   );
@@ -23,7 +25,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({ product, onClose }) 
 
   React.useEffect(() => {
     if (product) {
-      setPresentation('FARDO');
+      setPresentation(product.conversionFactor > 1 ? 'FARDO' : 'UNIDADE');
       setTemperature(product.supportsCold ? 'GELADA' : 'NATURAL');
       setVasilhameOption(product.isReturnable ? 'TROCA' : 'NAO_APLICA');
       setQuantity(1);
@@ -74,28 +76,46 @@ export const ProductModal: React.FC<ProductModalProps> = ({ product, onClose }) 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm animate-in fade-in duration-200">
       <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-lg w-full max-h-[92vh] overflow-y-auto text-white shadow-2xl relative flex flex-col">
-        {/* Header Image & Close */}
-        <div className="relative h-48 bg-slate-950 overflow-hidden shrink-0">
-          <img
-            src={product.image}
-            alt={product.name}
-            className="w-full h-full object-cover opacity-85"
-          />
-          <div className="absolute inset-0 bg-gradient-to-t from-slate-900 via-transparent to-black/40" />
-          <button
-            onClick={onClose}
-            className="absolute top-3 right-3 p-2 rounded-full bg-slate-900/80 hover:bg-slate-800 text-slate-300 hover:text-white transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
+        {/* Header Image (se houver) & Close */}
+        {product.image ? (
+          <div className="relative h-48 bg-slate-950 overflow-hidden shrink-0">
+            <img
+              src={product.image}
+              alt={product.name}
+              referrerPolicy="no-referrer"
+              className="w-full h-full object-cover opacity-85"
+            />
+            <div className="absolute inset-0 bg-gradient-to-t from-slate-900 via-transparent to-black/40" />
+            <button
+              onClick={onClose}
+              className="absolute top-3 right-3 p-2 rounded-full bg-slate-900/80 hover:bg-slate-800 text-slate-300 hover:text-white transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
 
-          <div className="absolute bottom-3 left-4 right-4">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400 bg-amber-500/20 px-2 py-0.5 rounded-full border border-amber-500/30">
-              {product.brand} • {product.volume}
-            </span>
-            <h3 className="text-xl font-extrabold text-white mt-1 leading-tight">{product.name}</h3>
+            <div className="absolute bottom-3 left-4 right-4">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400 bg-amber-500/20 px-2 py-0.5 rounded-full border border-amber-500/30">
+                {product.brand} • {product.volume}
+              </span>
+              <h3 className="text-xl font-extrabold text-white mt-1 leading-tight">{product.name}</h3>
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="p-5 bg-slate-950 border-b border-slate-800 flex items-start justify-between gap-3 shrink-0">
+            <div className="min-w-0">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400 bg-amber-500/20 px-2 py-0.5 rounded-full border border-amber-500/30">
+                {product.brand} • {product.volume}
+              </span>
+              <h3 className="text-xl font-extrabold text-white mt-2 leading-tight">{product.name}</h3>
+            </div>
+            <button
+              onClick={onClose}
+              className="p-2 rounded-full bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white transition-colors shrink-0"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+        )}
 
         {/* Content Body */}
         <div className="p-5 space-y-5 flex-1">
@@ -237,7 +257,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({ product, onClose }) 
                   className={`flex items-start gap-3 p-2.5 rounded-xl border cursor-pointer transition-all ${
                     vasilhameOption === 'TROCA'
                       ? 'border-emerald-500 bg-emerald-500/10 text-emerald-200'
-                      : 'border-slate-800 bg-slate-850 text-slate-300 hover:bg-slate-800'
+                      : 'border-slate-800 bg-slate-950/60 text-slate-300 hover:bg-slate-800'
                   }`}
                 >
                   <input
@@ -263,7 +283,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({ product, onClose }) 
                   className={`flex items-start gap-3 p-2.5 rounded-xl border cursor-pointer transition-all ${
                     vasilhameOption === 'COMPRAR_CASCO'
                       ? 'border-amber-500 bg-amber-500/10 text-amber-200'
-                      : 'border-slate-800 bg-slate-850 text-slate-300 hover:bg-slate-800'
+                      : 'border-slate-800 bg-slate-950/60 text-slate-300 hover:bg-slate-800'
                   }`}
                 >
                   <input

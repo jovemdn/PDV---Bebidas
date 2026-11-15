@@ -165,15 +165,17 @@ export const LogisticaMotoboys: React.FC = () => {
                   {/* Ações Rápidas: Toggle Plantão, Editar, Excluir */}
                   <div className="flex items-center gap-1">
                     <button
+                      type="button"
                       onClick={() => toggleMotoboyOnline(boy.id)}
                       title={boy.isOnline ? 'Clique para colocar Off-line' : 'Clique para colocar Em Plantão'}
-                      className={`p-1.5 rounded-lg border text-xs font-bold transition-colors ${
+                      className={`px-2 py-1.5 rounded-lg border text-[11px] font-bold flex items-center gap-1 transition-colors cursor-pointer ${
                         boy.isOnline
                           ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20'
-                          : 'bg-slate-800 text-slate-500 border-slate-700 hover:text-slate-300'
+                          : 'bg-rose-500/10 text-rose-300 border-rose-500/30 hover:bg-rose-500/20'
                       }`}
                     >
                       <Power className="w-3.5 h-3.5" />
+                      <span>{boy.isOnline ? 'Online' : 'Offline'}</span>
                     </button>
 
                     <button

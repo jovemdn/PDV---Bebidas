@@ -15,6 +15,8 @@ import {
   AlertCircle,
   Truck,
   CheckCircle,
+  Cloud,
+  ExternalLink,
 } from 'lucide-react';
 
 interface CustomerCartDrawerProps {
@@ -35,20 +37,24 @@ export const CustomerCartDrawer: React.FC<CustomerCartDrawerProps> = ({
     cartTotalAmount,
     submitCustomerCheckout,
     settings,
+    cloudUser,
+    cloudSyncing,
+    connectCloudGoogle,
   } = useBeverage();
 
   // Form states
-  const [customerName, setCustomerName] = useState('Bruno Silva');
-  const [customerPhone, setCustomerPhone] = useState('(11) 98765-1122');
-  const [address, setAddress] = useState('Rua dos Pinheiros');
-  const [number, setNumber] = useState('740');
-  const [neighborhood, setNeighborhood] = useState('Pinheiros');
-  const [complement, setComplement] = useState('Apto 52');
+  const [customerName, setCustomerName] = useState('');
+  const [customerPhone, setCustomerPhone] = useState('');
+  const [address, setAddress] = useState('');
+  const [number, setNumber] = useState('');
+  const [neighborhood, setNeighborhood] = useState('');
+  const [complement, setComplement] = useState('');
 
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('PIX');
-  const [changeFor, setChangeFor] = useState<number | undefined>(undefined);
+  const [changeForInput, setChangeForInput] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [showWhatsAppFallback, setShowWhatsAppFallback] = useState(false);
 
   if (!isOpen) return null;
 
@@ -70,9 +76,42 @@ export const CustomerCartDrawer: React.FC<CustomerCartDrawerProps> = ({
   const deliveryFee = settings.defaultDeliveryFee;
   const grandTotal = cartTotalAmount + deliveryFee;
 
+  const buildWhatsAppOrderUrl = () => {
+    const rawWa = (settings.ownerWhatsApp || settings.phone || '5521979474405').replace(/\D/g, '');
+    const waDigits = rawWa.startsWith('55') ? rawWa : `55${rawWa}`;
+    const itemsLines = cart
+      .map(
+        (it) =>
+          `• ${it.quantity}x ${it.product.name} (${it.presentation === 'FARDO' ? it.product.packName : 'Unid'} · ${it.temperature === 'GELADA' ? 'Gelada' : 'Natural'}) — R$ ${it.subtotal.toFixed(2)}`
+      )
+      .join('\n');
+    const payLabel =
+      paymentMethod === 'CARTAO_ENTREGA'
+        ? 'Cartão na Entrega'
+        : paymentMethod === 'DINHEIRO'
+        ? `Dinheiro${changeForInput ? ` (troco p/ R$ ${changeForInput})` : ''}`
+        : 'PIX';
+    const msg = [
+      `🛒 *NOVO PEDIDO DELIVERY — ${settings.storeName}*`,
+      ``,
+      `*Cliente:* ${customerName || 'Não informado'}`,
+      `*WhatsApp:* ${customerPhone || 'Não informado'}`,
+      `*Endereço:* ${address}, ${number} - ${neighborhood}${complement ? ` (${complement})` : ''}`,
+      ``,
+      `*Itens:*`,
+      itemsLines,
+      ``,
+      `*Taxa de Entrega:* R$ ${deliveryFee.toFixed(2)}`,
+      `*Total:* R$ ${grandTotal.toFixed(2)}`,
+      `*Pagamento:* ${payLabel}`,
+    ].join('\n');
+    return `https://wa.me/${waDigits}?text=${encodeURIComponent(msg)}`;
+  };
+
   const handleCheckout = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
+    setShowWhatsAppFallback(false);
 
     if (cart.length === 0) {
       setFormError('Seu carrinho está vazio!');
@@ -84,13 +123,31 @@ export const CustomerCartDrawer: React.FC<CustomerCartDrawerProps> = ({
       return;
     }
 
-    if (paymentMethod === 'DINHEIRO' && changeFor && changeFor < grandTotal) {
-      setFormError(`O valor para troco (R$ ${changeFor.toFixed(2)}) deve ser maior que o total (R$ ${grandTotal.toFixed(2)})`);
+    const parsedChangeFor = (() => {
+      const cleaned = changeForInput.replace(/\s+/g, '').replace(',', '.');
+      if (!cleaned || cleaned === '.') return undefined;
+      const n = Number(cleaned);
+      return Number.isFinite(n) && n > 0 ? n : undefined;
+    })();
+
+    if (paymentMethod === 'DINHEIRO' && parsedChangeFor && parsedChangeFor < grandTotal) {
+      setFormError(`O valor para troco (R$ ${parsedChangeFor.toFixed(2)}) deve ser maior que o total (R$ ${grandTotal.toFixed(2)})`);
       return;
     }
 
     setIsSubmitting(true);
     try {
+      if (!cloudUser?.emailVerified) {
+        const authRes = await connectCloudGoogle();
+        if (!authRes.success) {
+          setShowWhatsAppFallback(true);
+          setFormError(
+            'Não foi possível conectar sua conta Google neste navegador. Tente novamente ou envie o pedido pelo WhatsApp da loja abaixo.'
+          );
+          return;
+        }
+      }
+
       const res = await submitCustomerCheckout({
         customer: {
           name: customerName,
@@ -101,17 +158,19 @@ export const CustomerCartDrawer: React.FC<CustomerCartDrawerProps> = ({
           complement,
         },
         paymentMethod,
-        changeFor: paymentMethod === 'DINHEIRO' ? changeFor : undefined,
+        changeFor: paymentMethod === 'DINHEIRO' ? parsedChangeFor : undefined,
       });
 
       if (res.success && res.orderId) {
         onOrderSuccess(res.orderId);
         onClose();
       } else {
+        setShowWhatsAppFallback(true);
         setFormError(res.error || 'Erro ao processar pedido.');
       }
     } catch {
-      setFormError('Ocorreu um erro inesperado ao conectar ao servidor.');
+      setShowWhatsAppFallback(true);
+      setFormError('Erro ao enviar na nuvem. Você pode tentar novamente ou enviar direto pelo WhatsApp abaixo.');
     } finally {
       setIsSubmitting(false);
     }
@@ -129,6 +188,7 @@ export const CustomerCartDrawer: React.FC<CustomerCartDrawerProps> = ({
             </span>
           </div>
           <button
+            type="button"
             onClick={onClose}
             className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white"
           >
@@ -159,13 +219,16 @@ export const CustomerCartDrawer: React.FC<CustomerCartDrawerProps> = ({
                 {cart.map((item) => (
                   <div
                     key={item.id}
-                    className="p-3 rounded-2xl bg-slate-850 border border-slate-800 flex items-start gap-3 relative group"
+                    className="p-3 rounded-2xl bg-slate-950/70 border border-slate-800 flex items-start gap-3 relative group"
                   >
-                    <img
-                      src={item.product.image}
-                      alt={item.product.name}
-                      className="w-14 h-14 rounded-xl object-cover bg-slate-900 shrink-0"
-                    />
+                    {item.product.image && (
+                      <img
+                        src={item.product.image}
+                        alt={item.product.name}
+                        referrerPolicy="no-referrer"
+                        className="w-14 h-14 rounded-xl object-cover bg-slate-900 shrink-0"
+                      />
+                    )}
 
                     <div className="flex-1 min-w-0">
                       <h5 className="text-xs font-bold text-white truncate">{item.product.name}</h5>
@@ -226,6 +289,7 @@ export const CustomerCartDrawer: React.FC<CustomerCartDrawerProps> = ({
                     </div>
 
                     <button
+                      type="button"
                       onClick={() => removeFromCart(item.id)}
                       className="p-1 rounded-lg text-slate-500 hover:text-red-400 transition-colors"
                       title="Remover"
@@ -321,6 +385,7 @@ export const CustomerCartDrawer: React.FC<CustomerCartDrawerProps> = ({
                         required
                         value={customerName}
                         onChange={(e) => setCustomerName(e.target.value)}
+                        placeholder="Seu nome"
                         className="w-full px-3 py-2 text-xs rounded-xl bg-slate-800 border border-slate-700 focus:outline-none focus:border-amber-500"
                       />
                     </div>
@@ -331,6 +396,7 @@ export const CustomerCartDrawer: React.FC<CustomerCartDrawerProps> = ({
                         required
                         value={customerPhone}
                         onChange={(e) => setCustomerPhone(e.target.value)}
+                        placeholder="(21) 99999-9999"
                         className="w-full px-3 py-2 text-xs rounded-xl bg-slate-800 border border-slate-700 focus:outline-none focus:border-amber-500"
                       />
                     </div>
@@ -393,10 +459,10 @@ export const CustomerCartDrawer: React.FC<CustomerCartDrawerProps> = ({
                       <div className="relative">
                         <span className="absolute left-3 top-2 text-xs text-slate-400 font-bold">R$</span>
                         <input
-                          type="number"
-                          step="0.50"
-                          value={changeFor || ''}
-                          onChange={(e) => setChangeFor(e.target.value ? parseFloat(e.target.value) : undefined)}
+                          type="text"
+                          inputMode="decimal"
+                          value={changeForInput}
+                          onChange={(e) => setChangeForInput(e.target.value.replace(/[^0-9.,]/g, ''))}
                           placeholder={`${Math.ceil(grandTotal / 10) * 10}`}
                           className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg bg-slate-900 border border-slate-700 text-white font-bold"
                         />
@@ -436,21 +502,62 @@ export const CustomerCartDrawer: React.FC<CustomerCartDrawerProps> = ({
               </div>
             </div>
 
+            <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-[11px]">
+              <div className="flex items-center gap-1.5 text-slate-300 min-w-0">
+                <Cloud
+                  className={`w-3.5 h-3.5 shrink-0 ${
+                    cloudUser?.emailVerified ? 'text-emerald-400' : 'text-amber-400'
+                  }`}
+                />
+                <span className="truncate">
+                  {cloudUser?.emailVerified
+                    ? `Conectado: ${cloudUser.email}`
+                    : 'Conecta com 1 toque no Google ao confirmar'}
+                </span>
+              </div>
+              {cloudUser?.emailVerified && (
+                <button
+                  type="button"
+                  disabled={cloudSyncing}
+                  onClick={() => void connectCloudGoogle()}
+                  className="text-amber-400 hover:text-amber-300 font-bold shrink-0 cursor-pointer"
+                >
+                  Trocar
+                </button>
+              )}
+            </div>
+
+            {showWhatsAppFallback && (
+              <a
+                href={buildWhatsAppOrderUrl()}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs flex items-center justify-center gap-2 shadow-lg transition-colors"
+              >
+                <ExternalLink className="w-4 h-4" />
+                <span>Enviar Pedido pelo WhatsApp da Loja</span>
+              </a>
+            )}
+
             <button
               type="button"
-              disabled={isSubmitting}
+              disabled={isSubmitting || cloudSyncing}
               onClick={handleCheckout}
               className={`w-full py-3.5 rounded-xl font-black text-sm flex items-center justify-center gap-2 shadow-xl transition-all ${
-                isSubmitting
+                isSubmitting || cloudSyncing
                   ? 'bg-slate-800 text-slate-500 cursor-wait'
                   : 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 shadow-amber-500/20 active:scale-[0.98]'
               }`}
             >
               <CheckCircle className="w-5 h-5" />
-              <span>{isSubmitting ? 'Validando Estoque & Enviando...' : 'Confirmar Pedido Express'}</span>
+              <span>
+                {isSubmitting || cloudSyncing
+                  ? 'Validando & Enviando na Nuvem...'
+                  : 'Confirmar Pedido Express'}
+              </span>
             </button>
             <p className="text-[10px] text-center text-slate-500">
-              ⚡ Sincronizado instantaneamente com o PDV do depósito via WebSocket
+              ⚡ Sincronizado instantaneamente na nuvem com o PDV do depósito
             </p>
           </div>
         )}

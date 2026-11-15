@@ -1,17 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useBeverage } from '../../context/BeverageContext';
 import { Product, ProductCategory } from '../../types';
 import {
   X,
-  Plus,
   Save,
   Package,
   Snowflake,
   RefreshCw,
-  Image as ImageIcon,
   DollarSign,
   AlertCircle,
-  Sparkles,
+  Upload,
+  Trash2,
+  Camera,
 } from 'lucide-react';
 
 interface ProdutoModalProps {
@@ -20,15 +20,42 @@ interface ProdutoModalProps {
   productToEdit?: Product | null;
 }
 
-const PRESET_IMAGES = [
-  { label: 'Cerveja Long Neck / Garrafa', url: 'https://images.unsplash.com/photo-1608270546103-971752b947c9?auto=format&fit=crop&w=600&q=80' },
-  { label: 'Cerveja Lata 350ml', url: 'https://images.unsplash.com/photo-1535958636474-b021ee887b13?auto=format&fit=crop&w=600&q=80' },
-  { label: 'Garrafa 600ml Retornável', url: 'https://images.unsplash.com/photo-1518176258769-f227c798150e?auto=format&fit=crop&w=600&q=80' },
-  { label: 'Refrigerante 2L Retornável', url: 'https://images.unsplash.com/photo-1622483767028-3f66f32aef97?auto=format&fit=crop&w=600&q=80' },
-  { label: 'Destilado / Whisky / Gin', url: 'https://images.unsplash.com/photo-1527281400683-1aae777175f8?auto=format&fit=crop&w=600&q=80' },
-  { label: 'Gelo em Cubos / Filtrado', url: 'https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=600&q=80' },
-  { label: 'Carvão Vegetal Churrasco', url: 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=600&q=80' },
-];
+function compressImageFileToDataUrl(file: File, maxSize = 420, quality = 0.78): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Falha ao ler arquivo de imagem.'));
+    reader.onload = () => {
+      const result = typeof reader.result === 'string' ? reader.result : '';
+      if (!result) {
+        reject(new Error('Imagem vazia.'));
+        return;
+      }
+      const img = new Image();
+      img.onerror = () => resolve(result);
+      img.onload = () => {
+        try {
+          const scale = Math.min(1, maxSize / Math.max(img.width || 1, img.height || 1));
+          const targetW = Math.max(1, Math.round(img.width * scale));
+          const targetH = Math.max(1, Math.round(img.height * scale));
+          const canvas = document.createElement('canvas');
+          canvas.width = targetW;
+          canvas.height = targetH;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve(result);
+            return;
+          }
+          ctx.drawImage(img, 0, 0, targetW, targetH);
+          resolve(canvas.toDataURL('image/jpeg', quality));
+        } catch {
+          resolve(result);
+        }
+      };
+      img.src = result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
 
 export const ProdutoModal: React.FC<ProdutoModalProps> = ({
   isOpen,
@@ -36,6 +63,8 @@ export const ProdutoModal: React.FC<ProdutoModalProps> = ({
   productToEdit,
 }) => {
   const { addProduct, updateProduct, vasilhames } = useBeverage();
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
 
   // Form Fields
   const [name, setName] = useState('');
@@ -43,7 +72,7 @@ export const ProdutoModal: React.FC<ProdutoModalProps> = ({
   const [category, setCategory] = useState<ProductCategory>('cervejas');
   const [volume, setVolume] = useState('350ml');
   const [description, setDescription] = useState('');
-  const [image, setImage] = useState(PRESET_IMAGES[0].url);
+  const [image, setImage] = useState('');
 
   // Venda Fracionada & Estoque
   const [baseUnit, setBaseUnit] = useState<'LATA' | 'GARRAFA' | 'PET' | 'SACO' | 'UN'>('LATA');
@@ -99,7 +128,7 @@ export const ProdutoModal: React.FC<ProdutoModalProps> = ({
       setCategory('cervejas');
       setVolume('350ml');
       setDescription('');
-      setImage(PRESET_IMAGES[0].url);
+      setImage('');
       setBaseUnit('LATA');
       setConversionFactor(12);
       setPackName('Fardo c/ 12 latas');
@@ -136,7 +165,7 @@ export const ProdutoModal: React.FC<ProdutoModalProps> = ({
       category,
       volume,
       description: description || `${name} com alta qualidade e preço justo.`,
-      image: image || PRESET_IMAGES[0].url,
+      image: image.trim(),
       baseUnit,
       conversionFactor: Math.max(1, conversionFactor),
       packName: conversionFactor > 1 ? packName : 'Unidade',
@@ -284,38 +313,77 @@ export const ProdutoModal: React.FC<ProdutoModalProps> = ({
               </div>
             </div>
 
-            {/* Imagem Preset */}
+            {/* Foto do Produto (Opcional — adicionada pelo Dono) */}
             <div>
-              <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">
-                Foto do Produto
-              </label>
-              <div className="flex items-center gap-3">
-                <img
-                  src={image}
-                  alt="Pré-visualização"
-                  className="w-12 h-12 rounded-xl object-cover bg-slate-950 border border-slate-700 shrink-0"
-                />
+              <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
+                <label className="text-[10px] font-bold uppercase text-slate-400 block">
+                  Foto do Produto (Opcional — envie do Celular/PC ou cole um link)
+                </label>
+                <div className="flex items-center gap-1.5">
+                  {image && (
+                    <button
+                      type="button"
+                      onClick={() => setImage('')}
+                      className="px-2 py-1 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 text-[10px] font-bold flex items-center gap-1 transition-colors"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                      <span>Remover Foto</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isUploadingImage}
+                    className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 text-[10px] font-black flex items-center gap-1.5 transition-colors disabled:opacity-60"
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>{isUploadingImage ? 'Processando foto...' : 'Enviar Foto Real (Celular / PC)'}</span>
+                  </button>
+                </div>
                 <input
-                  type="url"
-                  value={image}
-                  onChange={(e) => setImage(e.target.value)}
-                  placeholder="URL da imagem..."
-                  className="flex-1 px-3 py-2 text-xs rounded-xl bg-slate-950 border border-slate-700 text-white focus:outline-none focus:border-amber-500"
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = '';
+                    if (!file) return;
+                    setFormError(null);
+                    setIsUploadingImage(true);
+                    try {
+                      const compressed = await compressImageFileToDataUrl(file);
+                      setImage(compressed);
+                    } catch {
+                      setFormError('Não foi possível carregar essa imagem. Tente outra foto JPG ou PNG.');
+                    } finally {
+                      setIsUploadingImage(false);
+                    }
+                  }}
                 />
               </div>
 
-              {/* Botões rápidos de preset */}
-              <div className="flex flex-wrap gap-1.5 mt-2">
-                {PRESET_IMAGES.map((preset, idx) => (
-                  <button
-                    key={idx}
-                    type="button"
-                    onClick={() => setImage(preset.url)}
-                    className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-[10px] text-slate-300 border border-slate-700"
-                  >
-                    {preset.label}
-                  </button>
-                ))}
+              <div className="flex items-center gap-3">
+                {image ? (
+                  <img
+                    src={image}
+                    alt="Pré-visualização"
+                    referrerPolicy="no-referrer"
+                    className="w-14 h-14 rounded-xl object-cover bg-slate-950 border border-slate-700 shrink-0"
+                  />
+                ) : (
+                  <div className="w-14 h-14 rounded-xl bg-slate-950 border border-dashed border-slate-700 shrink-0 flex flex-col items-center justify-center text-slate-500">
+                    <Camera className="w-4 h-4" />
+                    <span className="text-[8px] mt-0.5">Sem foto</span>
+                  </div>
+                )}
+                <input
+                  type="text"
+                  value={image}
+                  onChange={(e) => setImage(e.target.value)}
+                  placeholder="Deixe vazio para exibir só o nome, ou envie/cole uma foto..."
+                  className="flex-1 px-3 py-2 text-xs rounded-xl bg-slate-950 border border-slate-700 text-white focus:outline-none focus:border-amber-500"
+                />
               </div>
             </div>
           </div>

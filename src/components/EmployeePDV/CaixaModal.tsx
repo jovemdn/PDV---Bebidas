@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useBeverage } from '../../context/BeverageContext';
 import { CashShiftRecord } from '../../types';
 import {
@@ -59,6 +59,7 @@ export const CaixaModal: React.FC<CaixaModalProps> = ({
   const {
     cashShift,
     shiftHistory,
+    cashFlows,
     settings,
     openCashShift,
     closeCashShift,
@@ -69,25 +70,50 @@ export const CaixaModal: React.FC<CaixaModalProps> = ({
     defaultMode === 'HISTORY' ? 'HISTORY' : 'ACTIONS'
   );
 
+  const safeNum = (v: unknown, fallback = 0): number =>
+    typeof v === 'number' && Number.isFinite(v) ? v : fallback;
+
+  const parseDecimalInput = (raw: string): number | undefined => {
+    const cleaned = raw.replace(/\s+/g, '').replace(',', '.');
+    if (!cleaned || cleaned === '.') return undefined;
+    const parsed = Number(cleaned);
+    if (!Number.isFinite(parsed) || parsed < 0) return undefined;
+    return parsed;
+  };
+
   // States para Abrir Caixa
-  const [openingFloat, setOpeningFloat] = useState(200.0);
+  const [openingFloatInput, setOpeningFloatInput] = useState('200.00');
   const [cashierNameInput, setCashierNameInput] = useState(
     cashShift.cashierName !== 'Aguardando Operador' ? cashShift.cashierName : 'Operador Balcão'
   );
 
-  // Cálculos do Turno Vigente
-  const totalBalcao = cashShift.balcaoCash + cashShift.balcaoCard + cashShift.balcaoPix;
-  const totalDelivery = cashShift.deliveryCash + cashShift.deliveryCard + cashShift.deliveryPix;
-  const totalVendas = totalBalcao + totalDelivery;
-  const expectedCashInDrawer = cashShift.initialFloat + cashShift.balcaoCash + cashShift.deliveryCash;
+  // Cálculos do Turno Vigente (incluindo Fluxo de Caixa: Suprimentos e Retiradas/Despesas)
+  const shiftFlows = cashFlows.filter((f) => f.shiftId === cashShift.id);
+  const totalCashInflows = shiftFlows
+    .filter((f) => f.type === 'SUPRIMENTO')
+    .reduce((sum, f) => sum + safeNum(f.amount, 0), 0);
+  const totalCashOutflows = shiftFlows
+    .filter((f) => f.type === 'RETIRADA_DESPESA')
+    .reduce((sum, f) => sum + safeNum(f.amount, 0), 0);
 
-  const [countedCash, setCountedCash] = useState<number>(expectedCashInDrawer);
+  const totalBalcao = safeNum(cashShift.balcaoCash) + safeNum(cashShift.balcaoCard) + safeNum(cashShift.balcaoPix);
+  const totalDelivery = safeNum(cashShift.deliveryCash) + safeNum(cashShift.deliveryCard) + safeNum(cashShift.deliveryPix);
+  const totalVendas = totalBalcao + totalDelivery;
+  const expectedCashInDrawer =
+    safeNum(cashShift.initialFloat) +
+    safeNum(cashShift.balcaoCash) +
+    safeNum(cashShift.deliveryCash) +
+    totalCashInflows -
+    totalCashOutflows;
+
+  const [countedCashInput, setCountedCashInput] = useState<string>(expectedCashInDrawer.toFixed(2));
   const [closingNotes, setClosingNotes] = useState('');
   const [lastClosedReport, setLastClosedReport] = useState<CashShiftRecord | null>(null);
+  const wasOpenRef = useRef(false);
 
-  // Destino do envio para o Dono (+5521960185101 / E-mail)
-  const [targetWhatsApp, setTargetWhatsApp] = useState(settings.ownerWhatsApp || '5521960185101');
-  const [targetEmail, setTargetEmail] = useState(settings.ownerEmail || 'tvhisoka@gmail.com');
+  // Destino do envio para o Dono (+5521979474405 / E-mail)
+  const [targetWhatsApp, setTargetWhatsApp] = useState(settings.ownerWhatsApp || '5521979474405');
+  const [targetEmail, setTargetEmail] = useState(settings.ownerEmail || '');
   const [copiedReport, setCopiedReport] = useState(false);
   const [pdfFeedback, setPdfFeedback] = useState<string | null>(null);
 
@@ -133,10 +159,11 @@ export const CaixaModal: React.FC<CaixaModalProps> = ({
   }, []);
 
   useEffect(() => {
-    if (isOpen) {
-      setCountedCash(Number(expectedCashInDrawer.toFixed(2)));
-      setTargetWhatsApp(settings.ownerWhatsApp || '5521960185101');
-      setTargetEmail(settings.ownerEmail || 'tvhisoka@gmail.com');
+    if (isOpen && !wasOpenRef.current) {
+      setCountedCashInput(expectedCashInDrawer.toFixed(2));
+      setOpeningFloatInput('200.00');
+      setTargetWhatsApp(settings.ownerWhatsApp || '5521979474405');
+      setTargetEmail(settings.ownerEmail || '');
       setPdfFeedback(null);
       setCopiedReport(false);
       setApiSendState({ loading: false });
@@ -158,6 +185,7 @@ export const CaixaModal: React.FC<CaixaModalProps> = ({
           // Modo offline/link direto continua funcionando normalmente
         });
     }
+    wasOpenRef.current = isOpen;
   }, [isOpen, expectedCashInDrawer, settings.ownerWhatsApp, settings.ownerEmail]);
 
   if (!isOpen) return null;
@@ -306,16 +334,20 @@ export const CaixaModal: React.FC<CaixaModalProps> = ({
     }
   };
 
+  const parsedOpeningFloat = parseDecimalInput(openingFloatInput) ?? 0;
+  const parsedCountedCash = parseDecimalInput(countedCashInput);
+  const effectiveCountedCash = parsedCountedCash ?? 0;
+
   const handleOpenSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    openCashShift(openingFloat, cashierNameInput);
+    openCashShift(parsedOpeningFloat, cashierNameInput);
     setLastClosedReport(null);
     onClose();
   };
 
   const handleCloseSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const record = closeCashShift(countedCash, closingNotes);
+    const record = closeCashShift(effectiveCountedCash, closingNotes);
     setLastClosedReport(record);
     if (apiStatus.whatsappApiConfigured) {
       void sendViaBackendApi(record);
@@ -345,7 +377,7 @@ export const CaixaModal: React.FC<CaixaModalProps> = ({
     }
   };
 
-  const diff = countedCash - expectedCashInDrawer;
+  const diff = effectiveCountedCash - expectedCashInDrawer;
 
   const renderClosingReportCard = (record: CashShiftRecord) => {
     const reportText = buildCashClosingMessage(record, settings);
@@ -390,6 +422,12 @@ export const CaixaModal: React.FC<CaixaModalProps> = ({
             <strong className="text-sm font-black text-white">
               R$ {record.initialFloat.toFixed(2)}
             </strong>
+            {((record.totalCashOutflows || 0) > 0 || (record.totalCashInflows || 0) > 0) && (
+              <span className="text-[10px] text-slate-400 block mt-0.5">
+                +Sup R$ {(record.totalCashInflows || 0).toFixed(2)} | -Desp R${' '}
+                {(record.totalCashOutflows || 0).toFixed(2)}
+              </span>
+            )}
           </div>
           <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800">
             <span className="text-[10px] text-slate-400 block">Saldo Final Esperado</span>
@@ -903,12 +941,14 @@ export const CaixaModal: React.FC<CaixaModalProps> = ({
                       <div className="relative">
                         <span className="absolute left-3 top-2.5 text-xs text-slate-400 font-bold">R$</span>
                         <input
-                          type="number"
-                          step="0.50"
-                          min="0"
-                          required
-                          value={openingFloat}
-                          onChange={(e) => setOpeningFloat(parseFloat(e.target.value) || 0)}
+                          type="text"
+                          inputMode="decimal"
+                          value={openingFloatInput}
+                          onChange={(e) => {
+                            const raw = e.target.value.replace(/[^0-9.,]/g, '');
+                            setOpeningFloatInput(raw);
+                          }}
+                          placeholder="0,00"
                           className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-emerald-500 font-black text-sm"
                         />
                       </div>
@@ -921,7 +961,7 @@ export const CaixaModal: React.FC<CaixaModalProps> = ({
                       <button
                         key={val}
                         type="button"
-                        onClick={() => setOpeningFloat(val)}
+                        onClick={() => setOpeningFloatInput(val.toFixed(2))}
                         className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-[11px] font-bold text-amber-400 border border-slate-800"
                       >
                         R$ {val}
@@ -1027,11 +1067,17 @@ export const CaixaModal: React.FC<CaixaModalProps> = ({
                           Conferência de Fechamento de Caixa
                         </h4>
                         <p className="text-[11px] text-slate-400">
-                          Saldo Final Esperado na Gaveta (Inicial + Dinheiro):{' '}
+                          Esperado na Gaveta (Inicial + Dinheiro + Suprimentos - Retiradas):{' '}
                           <strong className="text-white font-bold">
                             R$ {expectedCashInDrawer.toFixed(2)}
                           </strong>
                         </p>
+                        {(totalCashInflows > 0 || totalCashOutflows > 0) && (
+                          <p className="text-[10px] text-slate-400 mt-0.5">
+                            Fluxo de Caixa: +R$ {totalCashInflows.toFixed(2)} suprimentos | -R${' '}
+                            {totalCashOutflows.toFixed(2)} retiradas/despesas
+                          </p>
+                        )}
                       </div>
                       <span className="text-xs font-black px-2.5 py-1 rounded-xl bg-slate-800 text-amber-300 border border-slate-700 self-start sm:self-auto">
                         Saldo Final: R$ {expectedCashInDrawer.toFixed(2)}
@@ -1046,12 +1092,14 @@ export const CaixaModal: React.FC<CaixaModalProps> = ({
                         <div className="relative">
                           <span className="absolute left-3 top-2.5 text-xs text-slate-400 font-bold">R$</span>
                           <input
-                            type="number"
-                            step="0.01"
-                            min="0"
-                            required
-                            value={countedCash}
-                            onChange={(e) => setCountedCash(parseFloat(e.target.value) || 0)}
+                            type="text"
+                            inputMode="decimal"
+                            value={countedCashInput}
+                            onChange={(e) => {
+                              const raw = e.target.value.replace(/[^0-9.,]/g, '');
+                              setCountedCashInput(raw);
+                            }}
+                            placeholder="0,00"
                             className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-amber-500 font-black text-sm"
                           />
                         </div>

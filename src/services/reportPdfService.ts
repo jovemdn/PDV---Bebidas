@@ -20,7 +20,7 @@ const formatDateTimeBR = (iso: string): string => {
 
 export const normalizeWhatsAppNumber = (rawPhone?: string): string => {
   const digits = (rawPhone || '').replace(/\D/g, '');
-  if (!digits) return '5521960185101';
+  if (!digits) return '5521979474405';
   if (digits.length === 10 || digits.length === 11) {
     return `55${digits}`;
   }
@@ -107,9 +107,14 @@ const createCashClosingDoc = (
   doc.text('1. CONFERENCIA DE CAIXA & SALDOS DA GAVETA', margin, y);
   y += 3;
 
+  const totalInflows = record.totalCashInflows || 0;
+  const totalOutflows = record.totalCashOutflows || 0;
+
   const drawerRows: [string, string, boolean?][] = [
     ['Saldo Inicial (Fundo de Troco)', formatBRL(record.initialFloat)],
     ['(+) Entradas em Dinheiro (Balcao + Delivery)', formatBRL(record.balcaoCash + record.deliveryCash)],
+    ['(+) Suprimentos / Reforcos de Caixa', formatBRL(totalInflows)],
+    ['(-) Retiradas / Despesas da Loja (Sangria)', `- ${formatBRL(totalOutflows)}`],
     ['(=) Saldo Final Esperado em Gaveta', formatBRL(record.expectedFinalCash), true],
     ['Saldo Informado (Contado pelo Operador)', formatBRL(record.finalCashInDrawer), true],
   ];
@@ -267,6 +272,39 @@ const createCashClosingDoc = (
     });
   }
 
+  // Bloco extra: Fluxo de Caixa (Retiradas / Despesas como Detergente e Suprimentos)
+  if (record.cashFlowMovements && record.cashFlowMovements.length > 0) {
+    y += 6;
+    ensureSpace(22);
+    doc.setTextColor(15, 23, 42);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10.5);
+    doc.text(`4. FLUXO DE CAIXA / DESPESAS & SUPRIMENTOS (${record.cashFlowMovements.length})`, margin, y);
+    y += 4;
+
+    record.cashFlowMovements.forEach((mov, idx) => {
+      ensureSpace(8);
+      doc.setFillColor(idx % 2 === 0 ? 255 : 248, idx % 2 === 0 ? 255 : 250, idx % 2 === 0 ? 255 : 252);
+      doc.setDrawColor(226, 232, 240);
+      doc.rect(margin, y, contentWidth, 7, 'FD');
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(30, 41, 59);
+      const prefix = mov.type === 'SUPRIMENTO' ? '(+) Suprimento' : '(-) Retirada/Despesa';
+      const desc = mov.description.length > 52 ? `${mov.description.slice(0, 49)}...` : mov.description;
+      doc.text(`${prefix}: ${desc}`, margin + 2.5, y + 4.8);
+      doc.setFont('helvetica', 'bold');
+      if (mov.type === 'SUPRIMENTO') {
+        doc.setTextColor(21, 128, 61);
+        doc.text(`+ ${formatBRL(mov.amount)}`, pageWidth - margin - 2.5, y + 4.8, { align: 'right' });
+      } else {
+        doc.setTextColor(185, 28, 28);
+        doc.text(`- ${formatBRL(mov.amount)}`, pageWidth - margin - 2.5, y + 4.8, { align: 'right' });
+      }
+      y += 7;
+    });
+  }
+
   // Observações
   if (record.notes) {
     y += 5;
@@ -350,6 +388,8 @@ export const buildCashClosingMessage = (
     `*1. CONFERENCIA DE SALDOS (GAVETA)*`,
     `• Saldo Inicial (Fundo): ${formatBRL(record.initialFloat)}`,
     `• (+) Dinheiro Entradas: ${formatBRL(totalMoney)}`,
+    `• (+) Suprimentos/Reforcos: ${formatBRL(record.totalCashInflows || 0)}`,
+    `• (-) Retiradas/Despesas (ex: loja): ${formatBRL(record.totalCashOutflows || 0)}`,
     `• (=) Saldo Final Esperado: ${formatBRL(record.expectedFinalCash)}`,
     `• Saldo Informado (Contado): ${formatBRL(record.finalCashInDrawer)}`,
     `• Status / Quebra de Caixa: *${diffStatus}*`,
@@ -417,6 +457,7 @@ export const buildWhatsAppCompactMessage = (
     ``,
     `*SALDOS DA GAVETA:*`,
     `• Inicial: ${formatBRL(record.initialFloat)} | Dinheiro: +${formatBRL(totalMoney)}`,
+    `• Suprimentos: +${formatBRL(record.totalCashInflows || 0)} | Retiradas: -${formatBRL(record.totalCashOutflows || 0)}`,
     `• Esperado: ${formatBRL(record.expectedFinalCash)} | Informado: ${formatBRL(record.finalCashInDrawer)}`,
     `• Status: *${diffStatus}*`,
     ``,
@@ -463,7 +504,7 @@ export const buildEmailReportUrl = (
   subject: string,
   body: string
 ): string => {
-  const cleanEmail = email.trim() || 'tvhisoka@gmail.com';
+  const cleanEmail = email.trim();
   return `mailto:${encodeURIComponent(cleanEmail)}?subject=${encodeURIComponent(
     subject
   )}&body=${encodeURIComponent(body)}`;

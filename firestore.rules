@@ -1,0 +1,1002 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Default Deny Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Reusable Security Primitives (Dynamic Store Owner, Zero Hardcoded Email)
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidEmailId(emailId) {
+      return emailId is string && emailId.size() >= 5 && emailId.size() <= 120 && emailId.matches('^[^/\\s]+@[^/\\s]+\\.[^/\\s]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function settingsPath() {
+      return /databases/$(database)/documents/storeSettings/main;
+    }
+
+    function publicStorePath() {
+      return /databases/$(database)/documents/storePublic/main;
+    }
+
+    function staffAccountPath(uid) {
+      return /databases/$(database)/documents/staffAccounts/$(uid);
+    }
+
+    function hasStoreOwner() {
+      return exists(settingsPath());
+    }
+
+    function currentStoreOwnerUid() {
+      return get(settingsPath()).data.ownerUid;
+    }
+
+    // Single-doc role helpers (NEVER used inside allow list)
+    function isOwnerAdmin() {
+      return isSignedIn() &&
+        hasStoreOwner() &&
+        get(settingsPath()).data.ownerUid == request.auth.uid &&
+        get(settingsPath()).data.ownerEmail == request.auth.token.email;
+    }
+
+    function isAuthorizedUsernameStaff() {
+      return isAuthenticated() &&
+        hasStoreOwner() &&
+        exists(staffAccountPath(request.auth.uid)) &&
+        get(staffAccountPath(request.auth.uid)).data.active == true &&
+        get(staffAccountPath(request.auth.uid)).data.storeOwnerUid == currentStoreOwnerUid();
+    }
+
+    function isAuthorizedStaff() {
+      return isOwnerAdmin() ||
+        isAuthorizedUsernameStaff() || (
+          isSignedIn() &&
+          hasStoreOwner() &&
+          (request.auth.token.email in get(settingsPath()).data.staffEmails)
+        );
+    }
+
+    // Query-safe helper (zero get()/exists() calls, safe for allow list)
+    function isStaffOnDoc(data) {
+      return isAuthenticated() && (
+        data.storeOwnerUid == request.auth.uid ||
+        ('staffUids' in data && data.staffUids is list && data.staffUids.size() <= 20 && request.auth.uid in data.staffUids) ||
+        (request.auth.token.email_verified == true && data.staffEmails is list && data.staffEmails.size() <= 10 && request.auth.token.email in data.staffEmails)
+      );
+    }
+
+    function isValidStaffEmailsList(listVal) {
+      return listVal is list &&
+        listVal.size() <= 10 &&
+        (listVal.size() == 0 || (listVal[0] is string && listVal[0].size() >= 5 && listVal[0].size() <= 120));
+    }
+
+    function isValidStaffUidsList(listVal) {
+      return listVal is list &&
+        listVal.size() <= 20 &&
+        (listVal.size() == 0 || (listVal[0] is string && listVal[0].size() >= 1 && listVal[0].size() <= 128));
+    }
+
+    // 3. Validation Blueprints (Anti-Update-Gap)
+
+    function isValidStorePublic(data) {
+      return data.keys().hasAll([
+        'id', 'ownerUid', 'storeName', 'phone', 'address', 'neighborhood', 'city',
+        'defaultDeliveryFee', 'minDeliveryMinutes', 'maxDeliveryMinutes',
+        'allowNegativeStock', 'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'id', 'ownerUid', 'storeName', 'phone', 'address', 'neighborhood', 'city',
+        'defaultDeliveryFee', 'minDeliveryMinutes', 'maxDeliveryMinutes',
+        'allowNegativeStock', 'activeStaffUids', 'createdAt', 'updatedAt'
+      ]) &&
+      isValidId(data.id) &&
+      data.ownerUid is string && data.ownerUid.size() > 0 && data.ownerUid.size() <= 128 &&
+      data.storeName is string && data.storeName.size() >= 1 && data.storeName.size() <= 120 &&
+      data.phone is string && data.phone.size() <= 40 &&
+      data.address is string && data.address.size() <= 200 &&
+      data.neighborhood is string && data.neighborhood.size() <= 120 &&
+      data.city is string && data.city.size() <= 120 &&
+      data.defaultDeliveryFee is number && data.defaultDeliveryFee >= 0 && data.defaultDeliveryFee <= 1000 &&
+      data.minDeliveryMinutes is number && data.minDeliveryMinutes >= 1 && data.minDeliveryMinutes <= 300 &&
+      data.maxDeliveryMinutes is number && data.maxDeliveryMinutes >= 1 && data.maxDeliveryMinutes <= 300 &&
+      data.allowNegativeStock is bool &&
+      (!('activeStaffUids' in data) || isValidStaffUidsList(data.activeStaffUids));
+    }
+
+    function isValidStoreSettings(data) {
+      return data.keys().hasAll([
+        'id', 'ownerUid', 'ownerEmail', 'staffEmails',
+        'storeName', 'phone', 'address', 'neighborhood', 'city', 'cnpj',
+        'defaultDeliveryFee', 'minDeliveryMinutes', 'maxDeliveryMinutes',
+        'motoboyCommission', 'allowNegativeStock', 'autoPrintReceipt',
+        'cancelPassword', 'ownerPassword', 'balcaoPassword', 'motoboyDefaultPassword',
+        'ownerWhatsApp', 'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'id', 'ownerUid', 'ownerEmail', 'staffEmails', 'staffUids',
+        'storeName', 'phone', 'address', 'neighborhood', 'city', 'cnpj',
+        'defaultDeliveryFee', 'minDeliveryMinutes', 'maxDeliveryMinutes',
+        'motoboyCommission', 'allowNegativeStock', 'autoPrintReceipt',
+        'cancelPassword', 'ownerPassword', 'balcaoPassword', 'motoboyDefaultPassword',
+        'ownerWhatsApp', 'createdAt', 'updatedAt'
+      ]) &&
+      isValidId(data.id) &&
+      data.ownerUid is string && data.ownerUid.size() > 0 && data.ownerUid.size() <= 128 &&
+      data.ownerEmail is string && data.ownerEmail.size() >= 5 && data.ownerEmail.size() <= 120 &&
+      isValidStaffEmailsList(data.staffEmails) &&
+      (!('staffUids' in data) || isValidStaffUidsList(data.staffUids)) &&
+      data.storeName is string && data.storeName.size() >= 1 && data.storeName.size() <= 120 &&
+      data.phone is string && data.phone.size() <= 40 &&
+      data.address is string && data.address.size() <= 200 &&
+      data.neighborhood is string && data.neighborhood.size() <= 120 &&
+      data.city is string && data.city.size() <= 120 &&
+      data.cnpj is string && data.cnpj.size() <= 32 &&
+      data.defaultDeliveryFee is number && data.defaultDeliveryFee >= 0 && data.defaultDeliveryFee <= 1000 &&
+      data.minDeliveryMinutes is number && data.minDeliveryMinutes >= 1 && data.minDeliveryMinutes <= 300 &&
+      data.maxDeliveryMinutes is number && data.maxDeliveryMinutes >= 1 && data.maxDeliveryMinutes <= 300 &&
+      data.motoboyCommission is number && data.motoboyCommission >= 0 && data.motoboyCommission <= 1000 &&
+      data.allowNegativeStock is bool &&
+      data.autoPrintReceipt is bool &&
+      data.cancelPassword is string && data.cancelPassword.size() >= 1 && data.cancelPassword.size() <= 64 &&
+      data.ownerPassword is string && data.ownerPassword.size() >= 1 && data.ownerPassword.size() <= 64 &&
+      data.balcaoPassword is string && data.balcaoPassword.size() >= 1 && data.balcaoPassword.size() <= 64 &&
+      data.motoboyDefaultPassword is string && data.motoboyDefaultPassword.size() >= 1 && data.motoboyDefaultPassword.size() <= 64 &&
+      data.ownerWhatsApp is string && data.ownerWhatsApp.size() <= 32;
+    }
+
+    function isValidStaffAccess(data) {
+      return data.keys().hasAll(['email', 'storeOwnerUid', 'ownerEmail', 'role', 'active', 'createdAt', 'updatedAt']) &&
+      data.keys().hasOnly(['email', 'storeOwnerUid', 'ownerEmail', 'role', 'active', 'createdAt', 'updatedAt']) &&
+      isValidEmailId(data.email) &&
+      data.storeOwnerUid is string && data.storeOwnerUid.size() > 0 && data.storeOwnerUid.size() <= 128 &&
+      data.ownerEmail is string && data.ownerEmail.size() >= 5 && data.ownerEmail.size() <= 120 &&
+      data.role in ['BALCAO', 'MOTOBOY'] &&
+      data.active is bool;
+    }
+
+    function isValidStaffAccount(data) {
+      return data.keys().hasAll([
+        'uid', 'username', 'displayName', 'syntheticEmail',
+        'role', 'motoboyId', 'storeOwnerUid', 'active', 'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'uid', 'username', 'displayName', 'syntheticEmail',
+        'role', 'motoboyId', 'storeOwnerUid', 'active', 'createdAt', 'updatedAt'
+      ]) &&
+      isValidId(data.uid) &&
+      data.username is string && data.username.size() >= 3 && data.username.size() <= 32 && data.username.matches('^[a-z0-9_\\-]+$') &&
+      data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 80 &&
+      data.syntheticEmail is string && data.syntheticEmail.size() >= 5 && data.syntheticEmail.size() <= 120 &&
+      data.role in ['BALCAO', 'MOTOBOY'] &&
+      data.motoboyId is string && data.motoboyId.size() <= 64 &&
+      data.storeOwnerUid is string && data.storeOwnerUid.size() > 0 && data.storeOwnerUid.size() <= 128 &&
+      data.active is bool;
+    }
+
+    function isValidProduct(data) {
+      return data.keys().hasAll([
+        'id', 'code', 'name', 'category', 'brand', 'image', 'description', 'volume',
+        'baseUnit', 'conversionFactor', 'packName', 'currentBaseStock', 'minAlertStock',
+        'costUnit', 'priceUnit', 'pricePack', 'supportsCold', 'coldSurchargeUnit',
+        'coldSurchargePack', 'isReturnable', 'vasilhameId', 'vasilhameName',
+        'vasilhameDepositPrice', 'storeOwnerUid', 'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'id', 'code', 'name', 'category', 'brand', 'image', 'description', 'volume',
+        'baseUnit', 'conversionFactor', 'packName', 'currentBaseStock', 'minAlertStock',
+        'costUnit', 'priceUnit', 'pricePack', 'supportsCold', 'coldSurchargeUnit',
+        'coldSurchargePack', 'isReturnable', 'vasilhameId', 'vasilhameName',
+        'vasilhameDepositPrice', 'storeOwnerUid', 'createdAt', 'updatedAt'
+      ]) &&
+      isValidId(data.id) &&
+      data.code is string && data.code.size() <= 40 &&
+      data.name is string && data.name.size() >= 1 && data.name.size() <= 160 &&
+      data.category in ['todas', 'cervejas', 'destilados', 'refrigerantes', 'gelo_churrasco', 'petiscos'] &&
+      data.brand is string && data.brand.size() <= 80 &&
+      data.image is string && data.image.size() <= 350000 &&
+      data.description is string && data.description.size() <= 500 &&
+      data.volume is string && data.volume.size() <= 40 &&
+      data.baseUnit in ['LATA', 'GARRAFA', 'PET', 'SACO', 'UN'] &&
+      data.conversionFactor is number && data.conversionFactor >= 1 && data.conversionFactor <= 500 &&
+      data.packName is string && data.packName.size() <= 80 &&
+      data.currentBaseStock is number && data.currentBaseStock >= 0 && data.currentBaseStock <= 1000000 &&
+      data.minAlertStock is number && data.minAlertStock >= 0 && data.minAlertStock <= 1000000 &&
+      data.costUnit is number && data.costUnit >= 0 && data.costUnit <= 1000000 &&
+      data.priceUnit is number && data.priceUnit >= 0 && data.priceUnit <= 1000000 &&
+      data.pricePack is number && data.pricePack >= 0 && data.pricePack <= 1000000 &&
+      data.supportsCold is bool &&
+      data.coldSurchargeUnit is number && data.coldSurchargeUnit >= 0 && data.coldSurchargeUnit <= 1000 &&
+      data.coldSurchargePack is number && data.coldSurchargePack >= 0 && data.coldSurchargePack <= 1000 &&
+      data.isReturnable is bool &&
+      data.vasilhameId is string && data.vasilhameId.size() <= 64 &&
+      data.vasilhameName is string && data.vasilhameName.size() <= 120 &&
+      data.vasilhameDepositPrice is number && data.vasilhameDepositPrice >= 0 && data.vasilhameDepositPrice <= 1000 &&
+      data.storeOwnerUid is string && data.storeOwnerUid.size() > 0 && data.storeOwnerUid.size() <= 128;
+    }
+
+    function isValidVasilhame(data) {
+      return data.keys().hasAll([
+        'id', 'name', 'bottleType', 'fullInStorage', 'emptyInYard',
+        'depositPrice', 'totalInCirculationWithCustomers', 'storeOwnerUid',
+        'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'id', 'name', 'bottleType', 'fullInStorage', 'emptyInYard',
+        'depositPrice', 'totalInCirculationWithCustomers', 'storeOwnerUid',
+        'createdAt', 'updatedAt'
+      ]) &&
+      isValidId(data.id) &&
+      data.name is string && data.name.size() >= 1 && data.name.size() <= 120 &&
+      data.bottleType is string && data.bottleType.size() <= 80 &&
+      data.fullInStorage is number && data.fullInStorage >= 0 && data.fullInStorage <= 1000000 &&
+      data.emptyInYard is number && data.emptyInYard >= 0 && data.emptyInYard <= 1000000 &&
+      data.depositPrice is number && data.depositPrice >= 0 && data.depositPrice <= 1000 &&
+      data.totalInCirculationWithCustomers is number && data.totalInCirculationWithCustomers >= 0 && data.totalInCirculationWithCustomers <= 1000000 &&
+      data.storeOwnerUid is string && data.storeOwnerUid.size() > 0 && data.storeOwnerUid.size() <= 128;
+    }
+
+    function isValidMotoboy(data) {
+      return data.keys().hasAll([
+        'id', 'name', 'phone', 'vehiclePlate', 'vehicleModel', 'isOnline',
+        'activeDeliveriesCount', 'totalDeliveriesCompletedToday',
+        'totalCollectedCash', 'totalCollectedCard', 'totalCollectedPix',
+        'commissionBalance', 'accessPassword', 'googleEmail',
+        'storeOwnerUid', 'staffEmails', 'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'id', 'name', 'phone', 'vehiclePlate', 'vehicleModel', 'isOnline',
+        'activeDeliveriesCount', 'totalDeliveriesCompletedToday',
+        'totalCollectedCash', 'totalCollectedCard', 'totalCollectedPix',
+        'commissionBalance', 'accessPassword', 'googleEmail',
+        'storeOwnerUid', 'staffEmails', 'staffUids', 'createdAt', 'updatedAt'
+      ]) &&
+      isValidId(data.id) &&
+      data.name is string && data.name.size() >= 1 && data.name.size() <= 120 &&
+      data.phone is string && data.phone.size() <= 40 &&
+      data.vehiclePlate is string && data.vehiclePlate.size() <= 24 &&
+      data.vehicleModel is string && data.vehicleModel.size() <= 100 &&
+      data.isOnline is bool &&
+      data.activeDeliveriesCount is number && data.activeDeliveriesCount >= 0 && data.activeDeliveriesCount <= 1000 &&
+      data.totalDeliveriesCompletedToday is number && data.totalDeliveriesCompletedToday >= 0 && data.totalDeliveriesCompletedToday <= 10000 &&
+      data.totalCollectedCash is number && data.totalCollectedCash >= 0 && data.totalCollectedCash <= 1000000 &&
+      data.totalCollectedCard is number && data.totalCollectedCard >= 0 && data.totalCollectedCard <= 1000000 &&
+      data.totalCollectedPix is number && data.totalCollectedPix >= 0 && data.totalCollectedPix <= 1000000 &&
+      data.commissionBalance is number && data.commissionBalance >= 0 && data.commissionBalance <= 1000000 &&
+      data.accessPassword is string && data.accessPassword.size() <= 64 &&
+      data.googleEmail is string && data.googleEmail.size() <= 120 &&
+      data.storeOwnerUid is string && data.storeOwnerUid.size() > 0 && data.storeOwnerUid.size() <= 128 &&
+      isValidStaffEmailsList(data.staffEmails) &&
+      (!('staffUids' in data) || isValidStaffUidsList(data.staffUids));
+    }
+
+    function isValidOrderCustomer(c) {
+      return c is map &&
+        c.keys().hasAll(['name', 'phone', 'address', 'number', 'neighborhood', 'complement']) &&
+        c.keys().hasOnly(['name', 'phone', 'address', 'number', 'neighborhood', 'complement']) &&
+        c.name is string && c.name.size() >= 1 && c.name.size() <= 120 &&
+        c.phone is string && c.phone.size() <= 40 &&
+        c.address is string && c.address.size() <= 200 &&
+        c.number is string && c.number.size() <= 40 &&
+        c.neighborhood is string && c.neighborhood.size() <= 120 &&
+        c.complement is string && c.complement.size() <= 120;
+    }
+
+    function isValidOrder(data) {
+      return data.keys().hasAll([
+        'id', 'orderNumber', 'channel', 'status',
+        'customerUid', 'customerEmail', 'storeOwnerUid', 'staffEmails',
+        'customer', 'items', 'subtotalProducts', 'totalColdSurcharge',
+        'totalVasilhameFee', 'deliveryFee', 'totalAmount', 'totalCost', 'grossProfit',
+        'paymentMethod', 'changeFor', 'motoboyId', 'motoboyName', 'motoboyAssignedAt',
+        'deliveredAt', 'estimatedDeliveryMinutes', 'vasilhamesVaziosAReceber',
+        'vasilhamesNovosVendidos', 'messages', 'canceledAt', 'canceledBy', 'cancelReason',
+        'clientCreatedAt', 'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'id', 'orderNumber', 'channel', 'status',
+        'customerUid', 'customerEmail', 'storeOwnerUid', 'staffEmails', 'staffUids',
+        'customer', 'items', 'subtotalProducts', 'totalColdSurcharge',
+        'totalVasilhameFee', 'deliveryFee', 'totalAmount', 'totalCost', 'grossProfit',
+        'paymentMethod', 'changeFor', 'motoboyId', 'motoboyName', 'motoboyAssignedAt',
+        'deliveredAt', 'estimatedDeliveryMinutes', 'vasilhamesVaziosAReceber',
+        'vasilhamesNovosVendidos', 'messages', 'canceledAt', 'canceledBy', 'cancelReason',
+        'clientCreatedAt', 'createdAt', 'updatedAt'
+      ]) &&
+      isValidId(data.id) &&
+      data.orderNumber is number && data.orderNumber >= 1 && data.orderNumber <= 10000000 &&
+      data.channel in ['DELIVERY_APP', 'BALCAO_PDV'] &&
+      data.status in ['PENDENTE', 'CONFIRMADO_PREPARO', 'AGUARDANDO_MOTOBOY', 'EM_ROTA', 'ENTREGUE', 'CANCELADO'] &&
+      data.customerUid is string && data.customerUid.size() <= 128 &&
+      data.customerEmail is string && data.customerEmail.size() <= 120 &&
+      data.storeOwnerUid is string && data.storeOwnerUid.size() <= 128 &&
+      isValidStaffEmailsList(data.staffEmails) &&
+      (!('staffUids' in data) || isValidStaffUidsList(data.staffUids)) &&
+      isValidOrderCustomer(data.customer) &&
+      data.items is list && data.items.size() >= 1 && data.items.size() <= 100 && data.items[0] is map &&
+      data.subtotalProducts is number && data.subtotalProducts >= 0 && data.subtotalProducts <= 1000000 &&
+      data.totalColdSurcharge is number && data.totalColdSurcharge >= 0 && data.totalColdSurcharge <= 100000 &&
+      data.totalVasilhameFee is number && data.totalVasilhameFee >= 0 && data.totalVasilhameFee <= 100000 &&
+      data.deliveryFee is number && data.deliveryFee >= 0 && data.deliveryFee <= 10000 &&
+      data.totalAmount is number && data.totalAmount >= 0 && data.totalAmount <= 1000000 &&
+      data.totalCost is number && data.totalCost >= 0 && data.totalCost <= 1000000 &&
+      data.grossProfit is number && data.grossProfit >= -1000000 && data.grossProfit <= 1000000 &&
+      data.paymentMethod in ['PIX', 'CARTAO_ENTREGA', 'DINHEIRO'] &&
+      data.changeFor is number && data.changeFor >= 0 && data.changeFor <= 1000000 &&
+      data.motoboyId is string && data.motoboyId.size() <= 64 &&
+      data.motoboyName is string && data.motoboyName.size() <= 120 &&
+      data.motoboyAssignedAt is string && data.motoboyAssignedAt.size() <= 40 &&
+      data.deliveredAt is string && data.deliveredAt.size() <= 40 &&
+      data.estimatedDeliveryMinutes is number && data.estimatedDeliveryMinutes >= 0 && data.estimatedDeliveryMinutes <= 300 &&
+      data.vasilhamesVaziosAReceber is number && data.vasilhamesVaziosAReceber >= 0 && data.vasilhamesVaziosAReceber <= 10000 &&
+      data.vasilhamesNovosVendidos is number && data.vasilhamesNovosVendidos >= 0 && data.vasilhamesNovosVendidos <= 10000 &&
+      data.messages is list && data.messages.size() <= 100 && (data.messages.size() == 0 || data.messages[0] is map) &&
+      data.canceledAt is string && data.canceledAt.size() <= 40 &&
+      data.canceledBy is string && data.canceledBy.size() <= 120 &&
+      data.cancelReason is string && data.cancelReason.size() <= 240 &&
+      data.clientCreatedAt is string && data.clientCreatedAt.size() <= 40;
+    }
+
+    function isValidTableTab(data) {
+      return data.keys().hasAll([
+        'id', 'numberOrLabel', 'customerName', 'status', 'openedAt', 'closedAt',
+        'openedBy', 'closedBy', 'items', 'totalAmount', 'paymentMethod', 'changeFor',
+        'orderId', 'orderNumber', 'storeOwnerUid', 'staffEmails', 'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'id', 'numberOrLabel', 'customerName', 'status', 'openedAt', 'closedAt',
+        'openedBy', 'closedBy', 'items', 'totalAmount', 'paymentMethod', 'changeFor',
+        'orderId', 'orderNumber', 'storeOwnerUid', 'staffEmails', 'staffUids', 'createdAt', 'updatedAt'
+      ]) &&
+      isValidId(data.id) &&
+      data.numberOrLabel is string && data.numberOrLabel.size() >= 1 && data.numberOrLabel.size() <= 80 &&
+      data.customerName is string && data.customerName.size() <= 120 &&
+      data.status in ['OPEN', 'CLOSED'] &&
+      data.openedAt is string && data.openedAt.size() <= 40 &&
+      data.closedAt is string && data.closedAt.size() <= 40 &&
+      data.openedBy is string && data.openedBy.size() <= 120 &&
+      data.closedBy is string && data.closedBy.size() <= 120 &&
+      data.items is list && data.items.size() <= 150 && (data.items.size() == 0 || data.items[0] is map) &&
+      data.totalAmount is number && data.totalAmount >= 0 && data.totalAmount <= 1000000 &&
+      data.paymentMethod is string && data.paymentMethod.size() <= 32 &&
+      data.changeFor is number && data.changeFor >= 0 && data.changeFor <= 1000000 &&
+      data.orderId is string && data.orderId.size() <= 80 &&
+      data.orderNumber is number && data.orderNumber >= 0 && data.orderNumber <= 10000000 &&
+      data.storeOwnerUid is string && data.storeOwnerUid.size() > 0 && data.storeOwnerUid.size() <= 128 &&
+      isValidStaffEmailsList(data.staffEmails) &&
+      (!('staffUids' in data) || isValidStaffUidsList(data.staffUids));
+    }
+
+    function isValidCashShift(data) {
+      return data.keys().hasAll([
+        'id', 'shiftId', 'cashierName', 'status', 'openedAt', 'closedAt',
+        'initialFloat', 'balcaoCash', 'balcaoCard', 'balcaoPix',
+        'deliveryCash', 'deliveryCard', 'deliveryPix',
+        'closingCashInDrawer', 'closingDifference', 'closingNotes',
+        'storeOwnerUid', 'staffEmails', 'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'id', 'shiftId', 'cashierName', 'status', 'openedAt', 'closedAt',
+        'initialFloat', 'balcaoCash', 'balcaoCard', 'balcaoPix',
+        'deliveryCash', 'deliveryCard', 'deliveryPix',
+        'closingCashInDrawer', 'closingDifference', 'closingNotes',
+        'storeOwnerUid', 'staffEmails', 'staffUids', 'createdAt', 'updatedAt'
+      ]) &&
+      isValidId(data.id) &&
+      data.shiftId is string && data.shiftId.size() <= 64 &&
+      data.cashierName is string && data.cashierName.size() <= 120 &&
+      data.status in ['OPEN', 'CLOSED'] &&
+      data.openedAt is string && data.openedAt.size() <= 40 &&
+      data.closedAt is string && data.closedAt.size() <= 40 &&
+      data.initialFloat is number && data.initialFloat >= 0 && data.initialFloat <= 1000000 &&
+      data.balcaoCash is number && data.balcaoCash >= 0 && data.balcaoCash <= 1000000 &&
+      data.balcaoCard is number && data.balcaoCard >= 0 && data.balcaoCard <= 1000000 &&
+      data.balcaoPix is number && data.balcaoPix >= 0 && data.balcaoPix <= 1000000 &&
+      data.deliveryCash is number && data.deliveryCash >= 0 && data.deliveryCash <= 1000000 &&
+      data.deliveryCard is number && data.deliveryCard >= 0 && data.deliveryCard <= 1000000 &&
+      data.deliveryPix is number && data.deliveryPix >= 0 && data.deliveryPix <= 1000000 &&
+      data.closingCashInDrawer is number && data.closingCashInDrawer >= 0 && data.closingCashInDrawer <= 1000000 &&
+      data.closingDifference is number && data.closingDifference >= -1000000 && data.closingDifference <= 1000000 &&
+      data.closingNotes is string && data.closingNotes.size() <= 400 &&
+      data.storeOwnerUid is string && data.storeOwnerUid.size() > 0 && data.storeOwnerUid.size() <= 128 &&
+      isValidStaffEmailsList(data.staffEmails) &&
+      (!('staffUids' in data) || isValidStaffUidsList(data.staffUids));
+    }
+
+    function isValidShiftRecord(data) {
+      return data.keys().hasAll([
+        'id', 'cashierName', 'openedAt', 'closedAt', 'initialFloat',
+        'totalBalcao', 'totalDelivery', 'totalSales',
+        'balcaoCash', 'balcaoCard', 'balcaoPix',
+        'deliveryCash', 'deliveryCard', 'deliveryPix',
+        'totalCashInflows', 'totalCashOutflows', 'cashFlowMovements',
+        'expectedFinalCash', 'finalCashInDrawer', 'closingDifference',
+        'totalCostOfGoods', 'totalGrossProfit', 'ordersCount',
+        'canceledOrdersCount', 'canceledTotalValue', 'soldProducts', 'notes',
+        'storeOwnerUid', 'staffEmails', 'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'id', 'cashierName', 'openedAt', 'closedAt', 'initialFloat',
+        'totalBalcao', 'totalDelivery', 'totalSales',
+        'balcaoCash', 'balcaoCard', 'balcaoPix',
+        'deliveryCash', 'deliveryCard', 'deliveryPix',
+        'totalCashInflows', 'totalCashOutflows', 'cashFlowMovements',
+        'expectedFinalCash', 'finalCashInDrawer', 'closingDifference',
+        'totalCostOfGoods', 'totalGrossProfit', 'ordersCount',
+        'canceledOrdersCount', 'canceledTotalValue', 'soldProducts', 'notes',
+        'storeOwnerUid', 'staffEmails', 'staffUids', 'createdAt', 'updatedAt'
+      ]) &&
+      isValidId(data.id) &&
+      data.cashierName is string && data.cashierName.size() <= 120 &&
+      data.openedAt is string && data.openedAt.size() <= 40 &&
+      data.closedAt is string && data.closedAt.size() <= 40 &&
+      data.initialFloat is number && data.initialFloat >= 0 && data.initialFloat <= 1000000 &&
+      data.totalBalcao is number && data.totalBalcao >= 0 && data.totalBalcao <= 10000000 &&
+      data.totalDelivery is number && data.totalDelivery >= 0 && data.totalDelivery <= 10000000 &&
+      data.totalSales is number && data.totalSales >= 0 && data.totalSales <= 10000000 &&
+      data.balcaoCash is number && data.balcaoCash >= 0 && data.balcaoCash <= 10000000 &&
+      data.balcaoCard is number && data.balcaoCard >= 0 && data.balcaoCard <= 10000000 &&
+      data.balcaoPix is number && data.balcaoPix >= 0 && data.balcaoPix <= 10000000 &&
+      data.deliveryCash is number && data.deliveryCash >= 0 && data.deliveryCash <= 10000000 &&
+      data.deliveryCard is number && data.deliveryCard >= 0 && data.deliveryCard <= 10000000 &&
+      data.deliveryPix is number && data.deliveryPix >= 0 && data.deliveryPix <= 10000000 &&
+      data.totalCashInflows is number && data.totalCashInflows >= 0 && data.totalCashInflows <= 10000000 &&
+      data.totalCashOutflows is number && data.totalCashOutflows >= 0 && data.totalCashOutflows <= 10000000 &&
+      data.cashFlowMovements is list && data.cashFlowMovements.size() <= 200 && (data.cashFlowMovements.size() == 0 || data.cashFlowMovements[0] is map) &&
+      data.expectedFinalCash is number && data.expectedFinalCash >= -10000000 && data.expectedFinalCash <= 10000000 &&
+      data.finalCashInDrawer is number && data.finalCashInDrawer >= 0 && data.finalCashInDrawer <= 10000000 &&
+      data.closingDifference is number && data.closingDifference >= -10000000 && data.closingDifference <= 10000000 &&
+      data.totalCostOfGoods is number && data.totalCostOfGoods >= 0 && data.totalCostOfGoods <= 10000000 &&
+      data.totalGrossProfit is number && data.totalGrossProfit >= -10000000 && data.totalGrossProfit <= 10000000 &&
+      data.ordersCount is number && data.ordersCount >= 0 && data.ordersCount <= 100000 &&
+      data.canceledOrdersCount is number && data.canceledOrdersCount >= 0 && data.canceledOrdersCount <= 100000 &&
+      data.canceledTotalValue is number && data.canceledTotalValue >= 0 && data.canceledTotalValue <= 10000000 &&
+      data.soldProducts is list && data.soldProducts.size() <= 500 && (data.soldProducts.size() == 0 || data.soldProducts[0] is map) &&
+      data.notes is string && data.notes.size() <= 400 &&
+      data.storeOwnerUid is string && data.storeOwnerUid.size() > 0 && data.storeOwnerUid.size() <= 128 &&
+      isValidStaffEmailsList(data.staffEmails) &&
+      (!('staffUids' in data) || isValidStaffUidsList(data.staffUids));
+    }
+
+    function isValidCashFlow(data) {
+      return data.keys().hasAll([
+        'id', 'shiftId', 'ownerUid', 'storeOwnerUid', 'staffEmails',
+        'type', 'category', 'amount', 'description', 'createdBy', 'createdAt'
+      ]) &&
+      data.keys().hasOnly([
+        'id', 'shiftId', 'ownerUid', 'storeOwnerUid', 'staffEmails', 'staffUids',
+        'type', 'category', 'amount', 'description', 'createdBy', 'createdAt'
+      ]) &&
+      isValidId(data.id) &&
+      isValidId(data.shiftId) &&
+      data.ownerUid is string && data.ownerUid.size() > 0 && data.ownerUid.size() <= 128 &&
+      data.storeOwnerUid is string && data.storeOwnerUid.size() > 0 && data.storeOwnerUid.size() <= 128 &&
+      isValidStaffEmailsList(data.staffEmails) &&
+      (!('staffUids' in data) || isValidStaffUidsList(data.staffUids)) &&
+      data.type in ['RETIRADA_DESPESA', 'SUPRIMENTO'] &&
+      data.category in ['DESPESA_LOJA', 'RETIRADA_DONO', 'FORNECEDOR', 'TROCO_REFORCO', 'OUTROS'] &&
+      data.amount is number && data.amount > 0 && data.amount <= 1000000 &&
+      data.description is string && data.description.size() >= 1 && data.description.size() <= 240 &&
+      data.createdBy is string && data.createdBy.size() >= 1 && data.createdBy.size() <= 100;
+    }
+
+    function isValidStockMovement(data) {
+      return data.keys().hasAll([
+        'id', 'productId', 'productName', 'type', 'unitsQuantity',
+        'previousStock', 'newStock', 'reason', 'clientCreatedAt',
+        'storeOwnerUid', 'staffEmails', 'createdAt'
+      ]) &&
+      data.keys().hasOnly([
+        'id', 'productId', 'productName', 'type', 'unitsQuantity',
+        'previousStock', 'newStock', 'reason', 'clientCreatedAt',
+        'storeOwnerUid', 'staffEmails', 'staffUids', 'createdAt'
+      ]) &&
+      isValidId(data.id) &&
+      data.productId is string && data.productId.size() > 0 && data.productId.size() <= 80 &&
+      data.productName is string && data.productName.size() >= 1 && data.productName.size() <= 160 &&
+      data.type in ['ENTRADA', 'AJUSTE', 'PERDA', 'VENDA'] &&
+      data.unitsQuantity is number && data.unitsQuantity >= 0 && data.unitsQuantity <= 1000000 &&
+      data.previousStock is number && data.previousStock >= 0 && data.previousStock <= 1000000 &&
+      data.newStock is number && data.newStock >= 0 && data.newStock <= 1000000 &&
+      data.reason is string && data.reason.size() <= 240 &&
+      data.clientCreatedAt is string && data.clientCreatedAt.size() <= 40 &&
+      data.storeOwnerUid is string && data.storeOwnerUid.size() <= 128 &&
+      isValidStaffEmailsList(data.staffEmails) &&
+      (!('staffUids' in data) || isValidStaffUidsList(data.staffUids));
+    }
+
+    // 4. Collection Security Rules
+
+    // Public Storefront Info (Non-PII)
+    match /storePublic/{storeId} {
+      allow get: if isValidId(storeId);
+      allow list: if false;
+      allow create: if isValidId(storeId) &&
+        storeId == 'main' &&
+        isSignedIn() &&
+        !exists(publicStorePath()) &&
+        isValidStorePublic(incoming()) &&
+        incoming().id == storeId &&
+        incoming().ownerUid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isValidId(storeId) &&
+        isValidStorePublic(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().ownerUid == existing().ownerUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          (
+            isOwnerAdmin() &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'storeName', 'phone', 'address', 'neighborhood', 'city',
+              'defaultDeliveryFee', 'minDeliveryMinutes', 'maxDeliveryMinutes',
+              'allowNegativeStock', 'activeStaffUids', 'updatedAt'
+            ])
+          ) ||
+          (
+            isAuthorizedStaff() &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'storeName', 'phone', 'address', 'neighborhood', 'city',
+              'defaultDeliveryFee', 'minDeliveryMinutes', 'maxDeliveryMinutes',
+              'allowNegativeStock', 'updatedAt'
+            ])
+          )
+        );
+      allow delete: if isValidId(storeId) && isOwnerAdmin();
+    }
+
+    // Private Store Settings & Passwords (Owner Admin Only)
+    match /storeSettings/{storeId} {
+      allow get: if isValidId(storeId) && isOwnerAdmin();
+      allow list: if false;
+      allow create: if isValidId(storeId) &&
+        storeId == 'main' &&
+        isSignedIn() &&
+        !hasStoreOwner() &&
+        isValidStoreSettings(incoming()) &&
+        incoming().id == storeId &&
+        incoming().ownerUid == request.auth.uid &&
+        incoming().ownerEmail == request.auth.token.email &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isValidId(storeId) &&
+        isOwnerAdmin() &&
+        isValidStoreSettings(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().ownerUid == existing().ownerUid &&
+        incoming().ownerEmail == existing().ownerEmail &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'staffEmails', 'staffUids', 'storeName', 'phone', 'address', 'neighborhood', 'city', 'cnpj',
+          'defaultDeliveryFee', 'minDeliveryMinutes', 'maxDeliveryMinutes',
+          'motoboyCommission', 'allowNegativeStock', 'autoPrintReceipt',
+          'cancelPassword', 'ownerPassword', 'balcaoPassword', 'motoboyDefaultPassword',
+          'ownerWhatsApp', 'updatedAt'
+        ]);
+      allow delete: if isValidId(storeId) && isOwnerAdmin();
+    }
+
+    // Individual Staff Cloud Access Directory (Google Email)
+    match /staffAccess/{emailId} {
+      allow get: if isValidEmailId(emailId) && isSignedIn() && (emailId == request.auth.token.email || isOwnerAdmin());
+      allow list: if isOwnerAdmin();
+      allow create: if isValidEmailId(emailId) &&
+        isOwnerAdmin() &&
+        isValidStaffAccess(incoming()) &&
+        incoming().email == emailId &&
+        incoming().storeOwnerUid == currentStoreOwnerUid() &&
+        incoming().ownerEmail == request.auth.token.email &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isValidEmailId(emailId) &&
+        isOwnerAdmin() &&
+        isValidStaffAccess(incoming()) &&
+        incoming().email == existing().email &&
+        incoming().storeOwnerUid == existing().storeOwnerUid &&
+        incoming().ownerEmail == existing().ownerEmail &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['role', 'active', 'updatedAt']);
+      allow delete: if isValidEmailId(emailId) && isOwnerAdmin();
+    }
+
+    // Owner-Created Username/Password Staff Accounts (Keyed by Firebase UID)
+    match /staffAccounts/{staffUid} {
+      allow get: if isValidId(staffUid) && isAuthenticated() && (
+        request.auth.uid == staffUid ||
+        (existing().storeOwnerUid == request.auth.uid && isOwnerAdmin())
+      );
+      allow list: if isSignedIn() && resource.data.storeOwnerUid == request.auth.uid;
+      allow create: if isValidId(staffUid) &&
+        isOwnerAdmin() &&
+        isValidStaffAccount(incoming()) &&
+        incoming().uid == staffUid &&
+        incoming().storeOwnerUid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isValidId(staffUid) &&
+        isOwnerAdmin() &&
+        isValidStaffAccount(incoming()) &&
+        incoming().uid == existing().uid &&
+        incoming().username == existing().username &&
+        incoming().syntheticEmail == existing().syntheticEmail &&
+        incoming().storeOwnerUid == existing().storeOwnerUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'displayName', 'role', 'motoboyId', 'active', 'updatedAt'
+        ]);
+      allow delete: if isValidId(staffUid) && isOwnerAdmin();
+    }
+
+    // Public Catalog Products (Non-PII)
+    match /products/{productId} {
+      allow get: if isValidId(productId);
+      allow list: if true;
+      allow create: if isValidId(productId) &&
+        isAuthorizedStaff() &&
+        isValidProduct(incoming()) &&
+        incoming().id == productId &&
+        incoming().storeOwnerUid == currentStoreOwnerUid() &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isValidId(productId) &&
+        isAuthenticated() &&
+        isValidProduct(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          (
+            isOwnerAdmin() &&
+            incoming().storeOwnerUid == currentStoreOwnerUid() &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'code', 'name', 'category', 'brand', 'image', 'description', 'volume',
+              'baseUnit', 'conversionFactor', 'packName', 'currentBaseStock', 'minAlertStock',
+              'costUnit', 'priceUnit', 'pricePack', 'supportsCold', 'coldSurchargeUnit',
+              'coldSurchargePack', 'isReturnable', 'vasilhameId', 'vasilhameName',
+              'vasilhameDepositPrice', 'storeOwnerUid', 'updatedAt'
+            ])
+          ) ||
+          (
+            isAuthorizedStaff() &&
+            incoming().storeOwnerUid == existing().storeOwnerUid &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'code', 'name', 'category', 'brand', 'image', 'description', 'volume',
+              'baseUnit', 'conversionFactor', 'packName', 'currentBaseStock', 'minAlertStock',
+              'costUnit', 'priceUnit', 'pricePack', 'supportsCold', 'coldSurchargeUnit',
+              'coldSurchargePack', 'isReturnable', 'vasilhameId', 'vasilhameName',
+              'vasilhameDepositPrice', 'updatedAt'
+            ])
+          ) ||
+          (
+            isSignedIn() &&
+            incoming().storeOwnerUid == existing().storeOwnerUid &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['currentBaseStock', 'updatedAt']) &&
+            incoming().currentBaseStock >= 0 &&
+            incoming().currentBaseStock <= existing().currentBaseStock
+          )
+        );
+      allow delete: if isValidId(productId) && isAuthorizedStaff();
+    }
+
+    // Public Vasilhames Rules & Counters (Non-PII)
+    match /vasilhames/{vasilhameId} {
+      allow get: if isValidId(vasilhameId);
+      allow list: if true;
+      allow create: if isValidId(vasilhameId) &&
+        isAuthorizedStaff() &&
+        isValidVasilhame(incoming()) &&
+        incoming().id == vasilhameId &&
+        incoming().storeOwnerUid == currentStoreOwnerUid() &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isValidId(vasilhameId) &&
+        isAuthenticated() &&
+        isValidVasilhame(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          (
+            isOwnerAdmin() &&
+            incoming().storeOwnerUid == currentStoreOwnerUid() &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'name', 'bottleType', 'fullInStorage', 'emptyInYard',
+              'depositPrice', 'totalInCirculationWithCustomers', 'storeOwnerUid', 'updatedAt'
+            ])
+          ) ||
+          (
+            isAuthorizedStaff() &&
+            incoming().storeOwnerUid == existing().storeOwnerUid &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'name', 'bottleType', 'fullInStorage', 'emptyInYard',
+              'depositPrice', 'totalInCirculationWithCustomers', 'updatedAt'
+            ])
+          ) ||
+          (
+            isSignedIn() &&
+            incoming().storeOwnerUid == existing().storeOwnerUid &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'fullInStorage', 'emptyInYard', 'totalInCirculationWithCustomers', 'updatedAt'
+            ])
+          )
+        );
+      allow delete: if isValidId(vasilhameId) && isOwnerAdmin();
+    }
+
+    // Motoboys Fleet (Staff & Owner Only)
+    match /motoboys/{motoboyId} {
+      allow get: if isValidId(motoboyId) && (isStaffOnDoc(existing()) || isAuthorizedStaff());
+      allow list: if isStaffOnDoc(resource.data);
+      allow create: if isValidId(motoboyId) &&
+        isOwnerAdmin() &&
+        isValidMotoboy(incoming()) &&
+        incoming().id == motoboyId &&
+        incoming().storeOwnerUid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isValidId(motoboyId) &&
+        isAuthenticated() &&
+        isValidMotoboy(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          (
+            isOwnerAdmin() &&
+            incoming().storeOwnerUid == request.auth.uid &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'name', 'phone', 'vehiclePlate', 'vehicleModel', 'isOnline',
+              'activeDeliveriesCount', 'totalDeliveriesCompletedToday',
+              'totalCollectedCash', 'totalCollectedCard', 'totalCollectedPix',
+              'commissionBalance', 'accessPassword', 'googleEmail', 'storeOwnerUid',
+              'staffEmails', 'staffUids', 'updatedAt'
+            ])
+          ) ||
+          (
+            isAuthorizedStaff() &&
+            incoming().storeOwnerUid == existing().storeOwnerUid &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'isOnline', 'activeDeliveriesCount', 'totalDeliveriesCompletedToday',
+              'totalCollectedCash', 'totalCollectedCard', 'totalCollectedPix',
+              'commissionBalance', 'updatedAt'
+            ])
+          )
+        );
+      allow delete: if isValidId(motoboyId) && isOwnerAdmin();
+    }
+
+    // Orders (Customer Own Orders + Store Staff)
+    match /orders/{orderId} {
+      allow get: if isValidId(orderId) && isAuthenticated() && (
+        (isSignedIn() && existing().customerUid == request.auth.uid) ||
+        isStaffOnDoc(existing()) ||
+        isAuthorizedStaff()
+      );
+      allow list: if isAuthenticated() && (
+        (isSignedIn() && resource.data.customerUid == request.auth.uid) ||
+        isStaffOnDoc(resource.data)
+      );
+      allow create: if isValidId(orderId) &&
+        isAuthenticated() &&
+        isValidOrder(incoming()) &&
+        incoming().id == orderId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        (
+          (
+            isAuthorizedStaff() &&
+            incoming().storeOwnerUid == currentStoreOwnerUid()
+          ) ||
+          (
+            isSignedIn() &&
+            incoming().customerUid == request.auth.uid &&
+            incoming().channel == 'DELIVERY_APP' &&
+            incoming().status == 'PENDENTE' &&
+            incoming().storeOwnerUid == (exists(publicStorePath()) ? get(publicStorePath()).data.ownerUid : '')
+          )
+        );
+      allow update: if isValidId(orderId) &&
+        isAuthenticated() &&
+        isValidOrder(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().orderNumber == existing().orderNumber &&
+        incoming().channel == existing().channel &&
+        incoming().customerUid == existing().customerUid &&
+        incoming().storeOwnerUid == existing().storeOwnerUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          (
+            isOwnerAdmin() &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'status', 'motoboyId', 'motoboyName', 'motoboyAssignedAt',
+              'deliveredAt', 'messages', 'canceledAt', 'canceledBy',
+              'cancelReason', 'staffEmails', 'staffUids', 'updatedAt'
+            ])
+          ) ||
+          (
+            isAuthorizedStaff() &&
+            !(existing().status in ['ENTREGUE', 'CANCELADO']) &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'status', 'motoboyId', 'motoboyName', 'motoboyAssignedAt',
+              'deliveredAt', 'messages', 'canceledAt', 'canceledBy',
+              'cancelReason', 'staffEmails', 'staffUids', 'updatedAt'
+            ])
+          ) ||
+          (
+            isSignedIn() &&
+            existing().customerUid == request.auth.uid &&
+            !(existing().status in ['ENTREGUE', 'CANCELADO']) &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['messages', 'updatedAt'])
+          )
+        );
+      allow delete: if isValidId(orderId) && isOwnerAdmin();
+    }
+
+    // Counter Tables / Comandas (Staff & Owner Only)
+    match /tables/{tableId} {
+      allow get: if isValidId(tableId) && (isStaffOnDoc(existing()) || isAuthorizedStaff());
+      allow list: if isStaffOnDoc(resource.data);
+      allow create: if isValidId(tableId) &&
+        isAuthorizedStaff() &&
+        isValidTableTab(incoming()) &&
+        incoming().id == tableId &&
+        incoming().storeOwnerUid == currentStoreOwnerUid() &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isValidId(tableId) &&
+        isAuthenticated() &&
+        isValidTableTab(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().storeOwnerUid == existing().storeOwnerUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          (
+            isOwnerAdmin() &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'numberOrLabel', 'customerName', 'status', 'closedAt', 'closedBy',
+              'items', 'totalAmount', 'paymentMethod', 'changeFor',
+              'orderId', 'orderNumber', 'staffEmails', 'staffUids', 'updatedAt'
+            ])
+          ) ||
+          (
+            isAuthorizedStaff() &&
+            existing().status == 'OPEN' &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'customerName', 'status', 'closedAt', 'closedBy',
+              'items', 'totalAmount', 'paymentMethod', 'changeFor',
+              'orderId', 'orderNumber', 'updatedAt'
+            ])
+          )
+        );
+      allow delete: if isValidId(tableId) && isAuthorizedStaff() && (existing().status == 'OPEN' || isOwnerAdmin());
+    }
+
+    // Cash Shifts (Staff & Owner Only)
+    match /cashShifts/{shiftId} {
+      allow get: if isValidId(shiftId) && (isStaffOnDoc(existing()) || isAuthorizedStaff());
+      allow list: if isStaffOnDoc(resource.data);
+      allow create: if isValidId(shiftId) &&
+        isAuthorizedStaff() &&
+        isValidCashShift(incoming()) &&
+        incoming().id == shiftId &&
+        incoming().storeOwnerUid == currentStoreOwnerUid() &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isValidId(shiftId) &&
+        isAuthenticated() &&
+        isValidCashShift(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().storeOwnerUid == existing().storeOwnerUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          (
+            isOwnerAdmin() &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'cashierName', 'status', 'closedAt',
+              'balcaoCash', 'balcaoCard', 'balcaoPix',
+              'deliveryCash', 'deliveryCard', 'deliveryPix',
+              'closingCashInDrawer', 'closingDifference', 'closingNotes',
+              'staffEmails', 'staffUids', 'updatedAt'
+            ])
+          ) ||
+          (
+            isAuthorizedStaff() &&
+            existing().status == 'OPEN' &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'status', 'closedAt',
+              'balcaoCash', 'balcaoCard', 'balcaoPix',
+              'deliveryCash', 'deliveryCard', 'deliveryPix',
+              'closingCashInDrawer', 'closingDifference', 'closingNotes',
+              'updatedAt'
+            ])
+          )
+        );
+      allow delete: if isValidId(shiftId) && isOwnerAdmin();
+    }
+
+    // Shift Closing History (Staff & Owner Only)
+    match /shiftHistory/{recordId} {
+      allow get: if isValidId(recordId) && (isStaffOnDoc(existing()) || isAuthorizedStaff());
+      allow list: if isStaffOnDoc(resource.data);
+      allow create: if isValidId(recordId) &&
+        isAuthorizedStaff() &&
+        isValidShiftRecord(incoming()) &&
+        incoming().id == recordId &&
+        incoming().storeOwnerUid == currentStoreOwnerUid() &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if false;
+      allow delete: if isValidId(recordId) && isOwnerAdmin();
+    }
+
+    // Cash Flow Ledger (Retiradas/Despesas e Suprimentos)
+    match /cashFlows/{flowId} {
+      allow get: if isValidId(flowId) && isAuthenticated() && (
+        existing().ownerUid == request.auth.uid ||
+        isStaffOnDoc(existing()) ||
+        isAuthorizedStaff()
+      );
+      allow list: if isAuthenticated() && (
+        resource.data.ownerUid == request.auth.uid ||
+        isStaffOnDoc(resource.data)
+      );
+      allow create: if isValidId(flowId) &&
+        isAuthorizedStaff() &&
+        isValidCashFlow(incoming()) &&
+        incoming().id == flowId &&
+        incoming().ownerUid == request.auth.uid &&
+        incoming().storeOwnerUid == currentStoreOwnerUid() &&
+        incoming().createdAt == request.time;
+      allow update: if false;
+      allow delete: if isValidId(flowId) && (
+        isOwnerAdmin() ||
+        (isAuthorizedStaff() && existing().ownerUid == request.auth.uid)
+      );
+    }
+
+    // Stock Movements Audit Ledger
+    match /stockMovements/{movementId} {
+      allow get: if isValidId(movementId) && (isStaffOnDoc(existing()) || isAuthorizedStaff());
+      allow list: if isStaffOnDoc(resource.data);
+      allow create: if isValidId(movementId) &&
+        isAuthenticated() &&
+        isValidStockMovement(incoming()) &&
+        incoming().id == movementId &&
+        incoming().createdAt == request.time &&
+        (
+          (isAuthorizedStaff() && incoming().storeOwnerUid == currentStoreOwnerUid()) ||
+          (isSignedIn() && incoming().type == 'VENDA' && incoming().storeOwnerUid == (exists(publicStorePath()) ? get(publicStorePath()).data.ownerUid : ''))
+        );
+      allow update: if false;
+      allow delete: if isValidId(movementId) && isOwnerAdmin();
+    }
+  }
+}

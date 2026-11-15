@@ -44,11 +44,23 @@ export const MotoboyView: React.FC = () => {
   const [activeChatOrderId, setActiveChatOrderId] = useState<string | null>(null);
   const [deviceViewMode, setDeviceViewMode] = useState<'MOBILE' | 'DESKTOP'>('MOBILE');
 
-  // Find the logged-in motoboy
+  // Find the logged-in motoboy safely
   const currentMotoboy: Motoboy =
     motoboys.find((m) => m.id === currentUser?.motoboyId) ||
-    motoboys.find((m) => m.name.toLowerCase().includes('carlos')) ||
-    motoboys[0];
+    motoboys[0] || {
+      id: currentUser?.motoboyId || 'moto-1',
+      name: currentUser?.name || 'Entregador da Loja',
+      phone: settings.phone || '',
+      vehiclePlate: 'LOJA-01',
+      vehicleModel: 'Moto de Entrega',
+      isOnline: true,
+      activeDeliveriesCount: 0,
+      totalDeliveriesCompletedToday: 0,
+      totalCollectedCash: 0,
+      totalCollectedCard: 0,
+      totalCollectedPix: 0,
+      commissionBalance: 0,
+    };
 
   // Active delivery orders assigned to this motoboy OR pending assignment
   const myAssignedOrders = orders.filter(
@@ -111,30 +123,32 @@ export const MotoboyView: React.FC = () => {
   const content = (
     <div className="space-y-4 pb-20 text-slate-100">
       {/* Motoboy Status Banner */}
-      <div className="bg-gradient-to-r from-slate-900 to-slate-850 p-4 rounded-3xl border border-slate-800 shadow-xl flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-500 to-amber-600 text-slate-950 flex items-center justify-center font-black text-2xl shadow-md">
+      <div className="bg-slate-900 p-4 rounded-3xl border border-slate-800 shadow-xl space-y-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-amber-500 to-amber-600 text-slate-950 flex items-center justify-center font-black text-xl shadow-md shrink-0">
             🛵
           </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-base font-black text-white">{currentMotoboy.name}</h2>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="text-sm sm:text-base font-black text-white truncate">
+                {currentMotoboy.name}
+              </h2>
               <span
-                className={`text-[9px] font-black px-2 py-0.5 rounded-full uppercase flex items-center gap-1 ${
+                className={`text-[10px] font-black px-2 py-0.5 rounded-full uppercase inline-flex items-center gap-1 shrink-0 ${
                   currentMotoboy.isOnline
                     ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                    : 'bg-slate-800 text-slate-400 border border-slate-700'
+                    : 'bg-rose-500/15 text-rose-300 border border-rose-500/30'
                 }`}
               >
                 <span
                   className={`w-1.5 h-1.5 rounded-full ${
-                    currentMotoboy.isOnline ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'
+                    currentMotoboy.isOnline ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'
                   }`}
                 />
-                {currentMotoboy.isOnline ? 'Disponível / Online' : 'Pausa / Offline'}
+                {currentMotoboy.isOnline ? 'Online' : 'Offline'}
               </span>
             </div>
-            <p className="text-xs text-slate-400">
+            <p className="text-xs text-slate-400 truncate mt-0.5">
               {currentMotoboy.vehicleModel} &bull; <strong className="text-slate-300">{currentMotoboy.vehiclePlate}</strong>
             </p>
           </div>
@@ -143,15 +157,19 @@ export const MotoboyView: React.FC = () => {
         <button
           type="button"
           onClick={() => toggleMotoboyOnline(currentMotoboy.id)}
-          className={`p-2.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all ${
+          className={`w-full min-h-[42px] px-4 py-2 rounded-xl border text-xs font-extrabold flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-[0.99] ${
             currentMotoboy.isOnline
-              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
-              : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'
+              ? 'bg-rose-500/10 border-rose-500/35 text-rose-300 hover:bg-rose-500/20'
+              : 'bg-emerald-500 hover:bg-emerald-400 border-emerald-400 text-slate-950'
           }`}
           title="Alternar Status Online/Offline"
         >
-          <Power className="w-4 h-4" />
-          <span className="hidden sm:inline">{currentMotoboy.isOnline ? 'Ficar Offline' : 'Ficar Online'}</span>
+          <Power className="w-4 h-4 shrink-0" />
+          <span>
+            {currentMotoboy.isOnline
+              ? 'Ficar Offline (Pausar Entregas)'
+              : 'Ficar Online (Disponível para Entregas)'}
+          </span>
         </button>
       </div>
 
@@ -163,7 +181,7 @@ export const MotoboyView: React.FC = () => {
           </span>
           <div className="flex items-baseline gap-1 mt-1">
             <span className="text-xl font-black text-white">
-              {currentMotoboy.totalDeliveriesCompletedToday}
+              {currentMotoboy.totalDeliveriesCompletedToday ?? 0}
             </span>
             <span className="text-[10px] text-slate-500">concluídas</span>
           </div>
@@ -175,7 +193,7 @@ export const MotoboyView: React.FC = () => {
           </span>
           <div className="mt-1">
             <span className="text-base sm:text-lg font-black text-amber-400">
-              R$ {currentMotoboy.totalCollectedCash.toFixed(2)}
+              R$ {(currentMotoboy.totalCollectedCash ?? 0).toFixed(2)}
             </span>
             <span className="text-[9px] text-slate-500 block">Acerto na loja</span>
           </div>
@@ -187,7 +205,7 @@ export const MotoboyView: React.FC = () => {
           </span>
           <div className="mt-1">
             <span className="text-base sm:text-lg font-black text-cyan-400">
-              R$ {currentMotoboy.totalCollectedCard.toFixed(2)}
+              R$ {(currentMotoboy.totalCollectedCard ?? 0).toFixed(2)}
             </span>
             <span className="text-[9px] text-slate-500 block">Coletado no cartão</span>
           </div>
@@ -199,10 +217,10 @@ export const MotoboyView: React.FC = () => {
           </span>
           <div className="mt-1">
             <span className="text-base sm:text-lg font-black text-emerald-400">
-              R$ {currentMotoboy.commissionBalance.toFixed(2)}
+              R$ {(currentMotoboy.commissionBalance ?? 0).toFixed(2)}
             </span>
             <span className="text-[9px] text-emerald-300 block">
-              R$ {settings.motoboyCommission.toFixed(2)}/entrega
+              R$ {(settings.motoboyCommission ?? 0).toFixed(2)}/entrega
             </span>
           </div>
         </div>

@@ -10,11 +10,35 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const PORT = Number(process.env.PORT) || 3000;
+function resolvePort(): number {
+  const portFlagIndex = process.argv.findIndex((arg) => arg === '--port' || arg === '-p');
+  if (portFlagIndex !== -1) {
+    const cliPort = Number(process.argv[portFlagIndex + 1]);
+    if (Number.isFinite(cliPort) && cliPort > 0) return cliPort;
+  }
+  const portEqArg = process.argv.find((arg) => arg.startsWith('--port='));
+  if (portEqArg) {
+    const cliPort = Number(portEqArg.split('=')[1]);
+    if (Number.isFinite(cliPort) && cliPort > 0) return cliPort;
+  }
+  const envPort = Number(process.env.PORT);
+  const nginxPort = Number(process.env.NGINX_PORT);
+  if (
+    process.env.NODE_ENV !== 'production' &&
+    Number.isFinite(nginxPort) &&
+    nginxPort > 0 &&
+    envPort === nginxPort
+  ) {
+    return Number(process.env.DEFAULT_APP_PORT) || 3000;
+  }
+  return (Number.isFinite(envPort) && envPort > 0 ? envPort : 0) || 3000;
+}
+
+const PORT = resolvePort();
 
 function normalizePhone(rawPhone?: string): string {
-  const digits = (rawPhone || process.env.OWNER_WHATSAPP || '5521960185101').replace(/\D/g, '');
-  if (!digits) return '5521960185101';
+  const digits = (rawPhone || process.env.OWNER_WHATSAPP || '5521979474405').replace(/\D/g, '');
+  if (!digits) return '5521979474405';
   if (digits.length === 10 || digits.length === 11) {
     return `55${digits}`;
   }
